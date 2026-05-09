@@ -1,0 +1,306 @@
+{
+  "schema_version": 1,
+  "name": "consolidation-manager-tidies-duplicate-orders",
+  "execution_mode": "dry_run",
+  "strategy_ids": ["consolidation-manager"],
+  "events": [
+    {
+      "event_type": "exchange.product_snapshot",
+      "payload": {
+        "product_count": 1,
+        "product_ids": ["SHB-26JUN26-CDE"],
+        "products": [
+          {
+            "base_increment": "0.01",
+            "base_max_size": "1",
+            "base_min_size": "0.01",
+            "cancel_only": false,
+            "is_disabled": false,
+            "limit_only": false,
+            "post_only": false,
+            "price_increment": "0.01",
+            "product_id": "SHB-26JUN26-CDE",
+            "product_type": "FUTURE",
+            "product_venue": "FCM",
+            "quote_max_size": "1000",
+            "quote_min_size": "1",
+            "trading_disabled": false,
+            "tradable_for_new_orders": true,
+            "view_only": false
+          }
+        ]
+      }
+    },
+    {
+      "event_type": "data.received",
+      "payload": {
+        "message_event_type": "data.received",
+        "message_key": "coinbase:l2_data:SHB-26JUN26-CDE:1",
+        "payload": {
+          "channel": "l2_data",
+          "raw": {
+            "channel": "l2_data",
+            "events": [
+              {
+                "product_id": "SHB-26JUN26-CDE",
+                "type": "snapshot",
+                "updates": [
+                  {
+                    "new_quantity": "5",
+                    "price_level": "99",
+                    "side": "bid"
+                  },
+                  {
+                    "new_quantity": "5",
+                    "price_level": "101",
+                    "side": "offer"
+                  }
+                ]
+              }
+            ],
+            "sequence_num": 1
+          },
+          "sequence_num": 1
+        },
+        "source_id": "scenario-cfm-market-primary"
+      }
+    },
+    {
+      "event_type": "data.accepted",
+      "payload": {
+        "message_event_type": "data.received",
+        "message_key": "coinbase:l2_data:SHB-26JUN26-CDE:1",
+        "received_sequence": 2,
+        "source_id": "scenario-cfm-market-primary"
+      }
+    },
+    {
+      "event_type": "action.requested",
+      "payload": {
+        "action_id": "source-a",
+        "action_type": "order.place",
+        "idempotency_key": "client-source-a",
+        "payload": {
+          "limit_price": "100",
+          "order_type": "limit",
+          "post_only": true,
+          "product_id": "SHB-26JUN26-CDE",
+          "reduce_only": false,
+          "side": "sell",
+          "size": "0.05",
+          "time_in_force": "good_until_cancelled"
+        }
+      }
+    },
+    {
+      "event_type": "action.accepted",
+      "payload": {
+        "action_id": "source-a",
+        "action_type": "order.place",
+        "requested_sequence": 4
+      }
+    },
+    {
+      "event_type": "order.logical_created",
+      "payload": {
+        "created_by_action_id": "source-a",
+        "lineage_relation": "root",
+        "limit_price": "100",
+        "logical_order_id": "source-a",
+        "metadata": {},
+        "parent_order_id": null,
+        "product_id": "SHB-26JUN26-CDE",
+        "root_order_id": "source-a",
+        "schema_version": 1,
+        "side": "sell",
+        "size": "0.05",
+        "source_order_ids": []
+      }
+    },
+    {
+      "event_type": "action.execution_started",
+      "payload": {
+        "accepted_sequence": 5,
+        "action_id": "source-a",
+        "action_type": "order.place",
+        "requested_sequence": 4
+      }
+    },
+    {
+      "event_type": "action.executed",
+      "payload": {
+        "action_id": "source-a",
+        "action_type": "order.place",
+        "execution_result": {
+          "action_id": "source-a",
+          "action_type": "order.place",
+          "client_order_id": "client-source-a",
+          "exchange_order_id": "exchange-source-a",
+          "mode": "dry_run",
+          "raw_response": {},
+          "status": "accepted"
+        },
+        "execution_started_sequence": 7,
+        "requested_sequence": 4
+      }
+    },
+    {
+      "event_type": "order.placement_recorded",
+      "payload": {
+        "action_id": "source-a",
+        "exchange_order_id": "exchange-source-a",
+        "limit_price": "100",
+        "logical_order_id": "source-a",
+        "metadata": {},
+        "placement_id": "source-a",
+        "placement_kind": "initial",
+        "placement_status": "accepted",
+        "product_id": "SHB-26JUN26-CDE",
+        "schema_version": 1,
+        "side": "sell",
+        "size": "0.05",
+        "venue_client_order_id": "client-source-a"
+      }
+    },
+    {
+      "event_type": "action.requested",
+      "payload": {
+        "action_id": "source-b",
+        "action_type": "order.place",
+        "idempotency_key": "client-source-b",
+        "payload": {
+          "limit_price": "100",
+          "order_type": "limit",
+          "post_only": true,
+          "product_id": "SHB-26JUN26-CDE",
+          "reduce_only": false,
+          "side": "sell",
+          "size": "0.05",
+          "time_in_force": "good_until_cancelled"
+        }
+      }
+    },
+    {
+      "event_type": "action.accepted",
+      "payload": {
+        "action_id": "source-b",
+        "action_type": "order.place",
+        "requested_sequence": 10
+      }
+    },
+    {
+      "event_type": "order.logical_created",
+      "payload": {
+        "created_by_action_id": "source-b",
+        "lineage_relation": "root",
+        "limit_price": "100",
+        "logical_order_id": "source-b",
+        "metadata": {},
+        "parent_order_id": null,
+        "product_id": "SHB-26JUN26-CDE",
+        "root_order_id": "source-b",
+        "schema_version": 1,
+        "side": "sell",
+        "size": "0.05",
+        "source_order_ids": []
+      }
+    },
+    {
+      "event_type": "action.execution_started",
+      "payload": {
+        "accepted_sequence": 11,
+        "action_id": "source-b",
+        "action_type": "order.place",
+        "requested_sequence": 10
+      }
+    },
+    {
+      "event_type": "action.executed",
+      "payload": {
+        "action_id": "source-b",
+        "action_type": "order.place",
+        "execution_result": {
+          "action_id": "source-b",
+          "action_type": "order.place",
+          "client_order_id": "client-source-b",
+          "exchange_order_id": "exchange-source-b",
+          "mode": "dry_run",
+          "raw_response": {},
+          "status": "accepted"
+        },
+        "execution_started_sequence": 13,
+        "requested_sequence": 10
+      }
+    },
+    {
+      "event_type": "order.placement_recorded",
+      "payload": {
+        "action_id": "source-b",
+        "exchange_order_id": "exchange-source-b",
+        "limit_price": "100",
+        "logical_order_id": "source-b",
+        "metadata": {},
+        "placement_id": "source-b",
+        "placement_kind": "initial",
+        "placement_status": "accepted",
+        "product_id": "SHB-26JUN26-CDE",
+        "schema_version": 1,
+        "side": "sell",
+        "size": "0.05",
+        "venue_client_order_id": "client-source-b"
+      }
+    }
+  ],
+  "expectations": {
+    "status": "ok",
+    "accepted_action_count": 3,
+    "rejected_action_count": 0,
+    "completed_count": 1,
+    "failed_count": 0,
+    "intent_count": 3,
+    "action_previews": [
+      {
+        "strategy_id": "consolidation-manager",
+        "action_id": "act-consolidation-ma-cancel-consolida-fbe37fb674b7ea7b75f9",
+        "status": "accepted",
+        "command_payload": {
+          "client_order_id": "client-source-a",
+          "exchange_order_id": "exchange-source-a"
+        }
+      },
+      {
+        "strategy_id": "consolidation-manager",
+        "action_id": "act-consolidation-ma-cancel-consolida-5c5b728d0b87a1719e3d",
+        "status": "accepted",
+        "command_payload": {
+          "client_order_id": "client-source-b",
+          "exchange_order_id": "exchange-source-b"
+        }
+      },
+      {
+        "strategy_id": "consolidation-manager",
+        "action_id": "act-consolidation-ma-tidy-consolidati-c35745062f1275cf9d28",
+        "status": "accepted",
+        "command_payload": {
+          "lineage_relation": "consolidation",
+          "logical_order_id": "act-consolidation-ma-tidy-consolidati-c35745062f1275cf9d28",
+          "metadata": {
+            "consolidation": {
+              "sizing_decision": {
+                "output_sizes": ["0.10"],
+                "requested_sizes": ["0.05", "0.05"]
+              },
+              "source_order_ids": ["source-a", "source-b"]
+            }
+          },
+          "post_only": true,
+          "product_id": "SHB-26JUN26-CDE",
+          "reduce_only": false,
+          "side": "sell",
+          "size": "0.10",
+          "source_order_ids": ["source-a", "source-b"]
+        }
+      }
+    ]
+  }
+}

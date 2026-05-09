@@ -1,0 +1,82 @@
+{
+  "cases": [
+    {
+      "case_id": "initial_runtime_and_missing_confirmation",
+      "notes": "Order acceptance is replayable, and the watchdog appends a missing-user-confirmation mismatch when no user-channel update arrives within the timeout.",
+      "outcome": "live_order_accepted_missing_user_confirmation",
+      "primary_events": [
+        "system.started",
+        "exchange.product_snapshot",
+        "action.executed",
+        "order.placement_recorded",
+        "reconciliation.mismatch",
+        "system.stopped"
+      ],
+      "sequence_end": 10,
+      "sequence_start": 1,
+      "title": "Initial Runtime Records Live Acceptance Then Mismatch"
+    },
+    {
+      "case_id": "restart_recovery_and_reconciliation_appends",
+      "notes": "A restarted process reconstructs the mismatch from the ledger, records the REST recovery, emits one fill, snapshots exchange state, and appends a position drift.",
+      "outcome": "recovered_open_order_fill_and_position_drift_appended",
+      "primary_events": [
+        "system.started",
+        "reconciliation.recovery",
+        "exchange.fill",
+        "exchange.balance_snapshot",
+        "exchange.position_snapshot",
+        "reconciliation.drift",
+        "system.stopped"
+      ],
+      "sequence_end": 17,
+      "sequence_start": 11,
+      "title": "Restart Replays Ledger And Appends Recovery/Fills/Drift"
+    },
+    {
+      "case_id": "restart_duplicate_suppression",
+      "notes": "Recovery and fill lookup run again after replay, but no duplicate recovery, fill, or drift record is appended; only fresh exchange-state snapshots are appended.",
+      "outcome": "duplicate_recovery_fill_and_drift_suppressed",
+      "primary_events": [
+        "system.started",
+        "exchange.balance_snapshot",
+        "exchange.position_snapshot",
+        "system.stopped"
+      ],
+      "sequence_end": 21,
+      "sequence_start": 18,
+      "title": "Second Restart Suppresses Duplicate Recovery Fill And Drift"
+    }
+  ],
+  "description": "Sanitized replayable audit-log sample showing runtime restart, ledger replay, recovery, fill reconciliation, exchange-state snapshots, drift append, and duplicate suppression after restart.",
+  "expected_event_counts": {
+    "exchange.balance_snapshot": 2,
+    "exchange.fill": 1,
+    "exchange.position_snapshot": 2,
+    "reconciliation.drift": 1,
+    "reconciliation.mismatch": 1,
+    "reconciliation.recovery": 1,
+    "system.started": 3,
+    "system.stopped": 3
+  },
+  "expected_ledger_health": {
+    "reconciliation_check_status": "attention_required",
+    "status": "attention_required",
+    "verified": true
+  },
+  "expected_summary": {
+    "exchange_balance_count": 1,
+    "exchange_position_count": 1,
+    "fill_count": 1,
+    "open_order_count": 1,
+    "record_count": 21,
+    "reconciliation_drift_count": 1,
+    "reconciliation_mismatch_count": 1,
+    "reconciliation_recovery_count": 1,
+    "system_start_count": 3,
+    "system_stop_count": 3,
+    "verified": true
+  },
+  "sample_ledger": "runtime-replay-recovery.jsonl",
+  "schema_version": 1
+}

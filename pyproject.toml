@@ -1,0 +1,58 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "staterail"
+version = "0.1.3"
+description = "Event-sourced execution infrastructure for auditable exchange workflows."
+readme = "README.md"
+requires-python = ">=3.11"
+license = "Apache-2.0"
+
+[project.optional-dependencies]
+aws = ["boto3"]
+coinbase = ["coinbase-advanced-py"]
+dev = ["pytest", "pytest-asyncio", "respx"]
+
+[project.scripts]
+staterail = "app.main:main"
+staterail-config-template = "tools.config_template:main"
+staterail-config-wizard = "tools.config_wizard:main"
+staterail-strategy-wizard = "tools.strategy_wizard:main"
+
+[tool.pytest.ini_options]
+addopts = "-p no:cacheprovider"
+pythonpath = ["."]
+testpaths = ["tests/regression"]
+
+[tool.setuptools.packages.find]
+include = [
+    "actions*",
+    "app*",
+    "audit*",
+    "config*",
+    "core*",
+    "exchanges*",
+    "feeds*",
+    "hooks*",
+    "orders*",
+    "products*",
+    "projections*",
+    "reconciliation*",
+    "risk*",
+    "runtime*",
+    "strategies*",
+    "tools*",
+    "triggers*",
+]
+exclude = [
+    "data*",
+    "docs*",
+    "pytest_tmp*",
+    "test_runtime*",
+    "tests*",
+]
+
+[tool.setuptools.package-data]
+"*" = ["py.typed"]

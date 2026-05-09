@@ -1,0 +1,162 @@
+{
+  "ledger_path": "data/passive-market-making-dry-run-audit.jsonl",
+  "bot": {
+    "rest": {
+      "execution_mode": "dry_run",
+      "retry": {
+        "max_attempts": 1,
+        "initial_delay_seconds": 0.25,
+        "max_delay_seconds": 2,
+        "multiplier": 2
+      }
+    },
+    "feed": {
+      "min_live_sources": 1,
+      "stale_after_seconds": 30,
+      "health": {
+        "enabled": false,
+        "interval_seconds": 5,
+        "run_on_start": false
+      },
+      "reconnect": {
+        "initial_delay_seconds": 1,
+        "max_delay_seconds": 30,
+        "multiplier": 2
+      }
+    },
+    "risk": {
+      "allowed_products": ["SHB-26JUN26-CDE"],
+      "allowed_order_types": ["limit"],
+      "max_order_size": "1000",
+      "max_order_notional": "25",
+      "kill_switch_enabled": false
+    },
+    "product_catalog": {
+      "enabled": false,
+      "interval_seconds": 3600,
+      "run_on_start": false,
+      "product_ids": ["SHB-26JUN26-CDE"]
+    },
+    "strategies": {
+      "enabled": false,
+      "interval_seconds": 1,
+      "run_on_start": false,
+      "allow_live_execution": false,
+      "strategy_ids": ["passive-market-making"],
+      "strategy_parameters": {
+        "passive-market-making": {
+          "target_notional_usd": "5",
+          "half_spread_bps": "50",
+          "max_products_per_evaluation": 1,
+          "max_staged_release_count_per_side": 1
+        }
+      },
+      "operator_policy": {
+        "schema_version": 1,
+        "policy_name": "passive_market_making_dry_run_policy_v0",
+        "scope": {
+          "products": ["SHB-26JUN26-CDE"],
+          "venue": "coinbase_cfm",
+          "live_orders_allowed": false
+        },
+        "risk_limits": {
+          "max_order_notional_usd": "25",
+          "max_daily_notional_usd": "100",
+          "max_open_orders": 2,
+          "allowed_sides": ["buy", "sell"],
+          "reduce_only_first": false,
+          "kill_switch_enabled": false
+        },
+        "market_data_requirements": {
+          "require_order_book": true,
+          "max_order_book_age_seconds": 30,
+          "require_product_metadata": false,
+          "require_redundant_feeds": false
+        },
+        "order_behavior": {
+          "default_order_type": "limit",
+          "default_leverage": "1",
+          "default_margin_type": "cross",
+          "allow_market_orders": false,
+          "post_only": true,
+          "time_in_force": "good_until_cancelled"
+        },
+        "lineage": {
+          "model": "flat_root",
+          "allow_manual_adoption": false,
+          "followup_on_fill": "allowed",
+          "move_same_side_orders": "allowed",
+          "split_orders": "allowed",
+          "merge_orders": "allowed"
+        },
+        "partial_fills": {
+          "followup_enabled": true,
+          "followup_size_mode": "percent_of_filled_size",
+          "followup_percent": "100",
+          "min_followup_notional_usd": "1"
+        },
+        "moves": {
+          "min_price_change_ticks": 1,
+          "cooldown_seconds": 10,
+          "cancel_replace_when_amend_not_supported": true
+        },
+        "staged_or_hidden_release": {
+          "allow_release": false,
+          "enabled": true,
+          "release_only_when_conditions_match": true,
+          "max_visible_notional_usd": "10"
+        }
+      }
+    },
+    "reconciliation": {
+      "watchdog": {
+        "enabled": false,
+        "interval_seconds": 5,
+        "run_on_start": false,
+        "user_confirmation_timeout_seconds": 30,
+        "execution_modes": ["live"]
+      },
+      "order_recovery": {
+        "enabled": false,
+        "interval_seconds": 30,
+        "run_on_start": false
+      },
+      "fills": {
+        "enabled": false,
+        "interval_seconds": 30,
+        "run_on_start": false,
+        "execution_modes": ["live"],
+        "limit": 100,
+        "max_pages_per_order": 5
+      },
+      "exchange_state": {
+        "enabled": false,
+        "interval_seconds": 60,
+        "run_on_start": false,
+        "account_page_limit": 250,
+        "max_account_pages": 10,
+        "position_size_tolerance": "0"
+      }
+    },
+    "trigger_polling": {
+      "enabled": false,
+      "interval_seconds": 1,
+      "run_on_start": false
+    },
+    "triggers": [],
+    "audit_anchor": {
+      "enabled": false,
+      "interval_seconds": 86400,
+      "run_on_start": false,
+      "store": {
+        "provider": "local_file",
+        "anchor_dir": "anchors"
+      }
+    },
+    "audit_archive": {
+      "enabled": false,
+      "interval_seconds": 86400,
+      "run_on_start": false
+    }
+  }
+}

@@ -1,0 +1,15 @@
+{
+  "schema_version": 1,
+  "name": "noop-empty-ledger",
+  "execution_mode": "dry_run",
+  "events": [],
+  "expectations": {
+    "status": "ok",
+    "accepted_action_count": 0,
+    "rejected_action_count": 0,
+    "completed_count": 1,
+    "failed_count": 0,
+    "intent_count": 0,
+    "action_previews": []
+  }
+}

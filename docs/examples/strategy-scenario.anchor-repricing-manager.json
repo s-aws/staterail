@@ -1,0 +1,214 @@
+{
+  "schema_version": 1,
+  "name": "anchor-repricing-manager-moves-drifted-order",
+  "execution_mode": "dry_run",
+  "strategy_ids": ["anchor-repricing-manager"],
+  "events": [
+    {
+      "event_type": "exchange.product_snapshot",
+      "payload": {
+        "product_count": 1,
+        "product_ids": ["SHB-26JUN26-CDE"],
+        "products": [
+          {
+            "base_increment": "0.01",
+            "base_max_size": "1",
+            "base_min_size": "0.01",
+            "cancel_only": false,
+            "is_disabled": false,
+            "limit_only": false,
+            "post_only": false,
+            "price_increment": "0.01",
+            "product_id": "SHB-26JUN26-CDE",
+            "product_type": "FUTURE",
+            "product_venue": "FCM",
+            "quote_max_size": "1000",
+            "quote_min_size": "1",
+            "trading_disabled": false,
+            "tradable_for_new_orders": true,
+            "view_only": false
+          }
+        ]
+      }
+    },
+    {
+      "event_type": "data.received",
+      "payload": {
+        "message_event_type": "data.received",
+        "message_key": "coinbase:l2_data:SHB-26JUN26-CDE:1",
+        "payload": {
+          "channel": "l2_data",
+          "raw": {
+            "channel": "l2_data",
+            "events": [
+              {
+                "product_id": "SHB-26JUN26-CDE",
+                "type": "snapshot",
+                "updates": [
+                  {
+                    "new_quantity": "5",
+                    "price_level": "104",
+                    "side": "bid"
+                  },
+                  {
+                    "new_quantity": "5",
+                    "price_level": "106",
+                    "side": "offer"
+                  }
+                ]
+              }
+            ],
+            "sequence_num": 1
+          },
+          "sequence_num": 1
+        },
+        "source_id": "scenario-cfm-market-primary"
+      }
+    },
+    {
+      "event_type": "data.accepted",
+      "payload": {
+        "message_event_type": "data.received",
+        "message_key": "coinbase:l2_data:SHB-26JUN26-CDE:1",
+        "received_sequence": 2,
+        "source_id": "scenario-cfm-market-primary"
+      }
+    },
+    {
+      "event_type": "action.requested",
+      "payload": {
+        "action_id": "source-anchor",
+        "action_type": "order.place",
+        "idempotency_key": "client-source-anchor",
+        "payload": {
+          "limit_price": "90",
+          "logical_order_id": "logical-anchor",
+          "order_type": "limit",
+          "post_only": true,
+          "product_id": "SHB-26JUN26-CDE",
+          "reduce_only": false,
+          "side": "buy",
+          "size": "0.05",
+          "time_in_force": "good_until_cancelled"
+        }
+      }
+    },
+    {
+      "event_type": "action.accepted",
+      "payload": {
+        "action_id": "source-anchor",
+        "action_type": "order.place",
+        "requested_sequence": 4
+      }
+    },
+    {
+      "event_type": "order.logical_created",
+      "payload": {
+        "created_by_action_id": "source-anchor",
+        "lineage_relation": "root",
+        "limit_price": "90",
+        "logical_order_id": "logical-anchor",
+        "metadata": {},
+        "parent_order_id": null,
+        "product_id": "SHB-26JUN26-CDE",
+        "root_order_id": "logical-anchor",
+        "schema_version": 1,
+        "side": "buy",
+        "size": "0.05",
+        "source_order_ids": []
+      }
+    },
+    {
+      "event_type": "action.execution_started",
+      "payload": {
+        "accepted_sequence": 5,
+        "action_id": "source-anchor",
+        "action_type": "order.place",
+        "requested_sequence": 4
+      }
+    },
+    {
+      "event_type": "action.executed",
+      "payload": {
+        "action_id": "source-anchor",
+        "action_type": "order.place",
+        "execution_result": {
+          "action_id": "source-anchor",
+          "action_type": "order.place",
+          "client_order_id": "client-source-anchor",
+          "exchange_order_id": "exchange-source-anchor",
+          "mode": "dry_run",
+          "raw_response": {},
+          "status": "accepted"
+        },
+        "execution_started_sequence": 7,
+        "requested_sequence": 4
+      }
+    },
+    {
+      "event_type": "order.placement_recorded",
+      "payload": {
+        "action_id": "source-anchor",
+        "exchange_order_id": "exchange-source-anchor",
+        "limit_price": "90",
+        "logical_order_id": "logical-anchor",
+        "metadata": {},
+        "placement_id": "source-anchor",
+        "placement_kind": "initial",
+        "placement_status": "accepted",
+        "product_id": "SHB-26JUN26-CDE",
+        "schema_version": 1,
+        "side": "buy",
+        "size": "0.05",
+        "venue_client_order_id": "client-source-anchor"
+      }
+    }
+  ],
+  "expectations": {
+    "status": "ok",
+    "accepted_action_count": 2,
+    "rejected_action_count": 0,
+    "completed_count": 1,
+    "failed_count": 0,
+    "intent_count": 2,
+    "action_previews": [
+      {
+        "strategy_id": "anchor-repricing-manager",
+        "action_id": "act-anchor-repricing-cancel-anchor-so-c6ceb915d17bbb5fa5e2",
+        "status": "accepted",
+        "command_payload": {
+          "client_order_id": "client-source-anchor",
+          "exchange_order_id": "exchange-source-anchor"
+        }
+      },
+      {
+        "strategy_id": "anchor-repricing-manager",
+        "action_id": "act-anchor-repricing-cancel-replace-a-0be9722a6ae244776a52",
+        "status": "accepted",
+        "command_payload": {
+          "limit_price": "99.75",
+          "logical_order_id": "logical-anchor",
+          "metadata": {
+            "anchor_repricing": {
+              "cancel_action_id": "act-anchor-repricing-cancel-anchor-so-c6ceb915d17bbb5fa5e2",
+              "current_price": "90",
+              "max_distance": "0.05",
+              "midpoint": "105",
+              "source_action_id": "source-anchor",
+              "source_exchange_order_id": "exchange-source-anchor",
+              "target_price": "99.75"
+            }
+          },
+          "order_type": "limit",
+          "placement_kind": "cancel_replace",
+          "post_only": true,
+          "product_id": "SHB-26JUN26-CDE",
+          "reduce_only": false,
+          "side": "buy",
+          "size": "0.05",
+          "time_in_force": "good_until_cancelled"
+        }
+      }
+    ]
+  }
+}

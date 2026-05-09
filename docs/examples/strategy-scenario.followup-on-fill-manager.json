@@ -1,0 +1,212 @@
+{
+  "schema_version": 1,
+  "name": "followup-on-fill-manager-creates-child",
+  "execution_mode": "dry_run",
+  "strategy_ids": ["followup-on-fill-manager"],
+  "events": [
+    {
+      "event_type": "exchange.product_snapshot",
+      "payload": {
+        "product_count": 1,
+        "product_ids": ["SHB-26JUN26-CDE"],
+        "products": [
+          {
+            "base_increment": "0.01",
+            "base_max_size": "1",
+            "base_min_size": "0.01",
+            "cancel_only": false,
+            "is_disabled": false,
+            "limit_only": false,
+            "post_only": false,
+            "price_increment": "0.01",
+            "product_id": "SHB-26JUN26-CDE",
+            "product_type": "FUTURE",
+            "product_venue": "FCM",
+            "quote_max_size": "1000",
+            "quote_min_size": "1",
+            "trading_disabled": false,
+            "tradable_for_new_orders": true,
+            "view_only": false
+          }
+        ]
+      }
+    },
+    {
+      "event_type": "data.received",
+      "payload": {
+        "message_event_type": "data.received",
+        "message_key": "coinbase:l2_data:SHB-26JUN26-CDE:1",
+        "payload": {
+          "channel": "l2_data",
+          "raw": {
+            "channel": "l2_data",
+            "events": [
+              {
+                "product_id": "SHB-26JUN26-CDE",
+                "type": "snapshot",
+                "updates": [
+                  {
+                    "new_quantity": "5",
+                    "price_level": "99",
+                    "side": "bid"
+                  },
+                  {
+                    "new_quantity": "5",
+                    "price_level": "101",
+                    "side": "offer"
+                  }
+                ]
+              }
+            ],
+            "sequence_num": 1
+          },
+          "sequence_num": 1
+        },
+        "source_id": "scenario-cfm-market-primary"
+      }
+    },
+    {
+      "event_type": "data.accepted",
+      "payload": {
+        "message_event_type": "data.received",
+        "message_key": "coinbase:l2_data:SHB-26JUN26-CDE:1",
+        "received_sequence": 2,
+        "source_id": "scenario-cfm-market-primary"
+      }
+    },
+    {
+      "event_type": "action.requested",
+      "payload": {
+        "action_id": "parent-action",
+        "action_type": "order.place",
+        "idempotency_key": "parent-client-order",
+        "payload": {
+          "limit_price": "100",
+          "order_type": "limit",
+          "post_only": true,
+          "product_id": "SHB-26JUN26-CDE",
+          "reduce_only": false,
+          "side": "buy",
+          "size": "0.2",
+          "time_in_force": "good_until_cancelled"
+        }
+      }
+    },
+    {
+      "event_type": "action.accepted",
+      "payload": {
+        "action_id": "parent-action",
+        "action_type": "order.place",
+        "requested_sequence": 4
+      }
+    },
+    {
+      "event_type": "order.logical_created",
+      "payload": {
+        "created_by_action_id": "parent-action",
+        "lineage_relation": "root",
+        "limit_price": "100",
+        "logical_order_id": "parent-action",
+        "metadata": {},
+        "parent_order_id": null,
+        "product_id": "SHB-26JUN26-CDE",
+        "root_order_id": "parent-action",
+        "schema_version": 1,
+        "side": "buy",
+        "size": "0.2",
+        "source_order_ids": []
+      }
+    },
+    {
+      "event_type": "action.execution_started",
+      "payload": {
+        "accepted_sequence": 5,
+        "action_id": "parent-action",
+        "action_type": "order.place",
+        "requested_sequence": 4
+      }
+    },
+    {
+      "event_type": "action.executed",
+      "payload": {
+        "action_id": "parent-action",
+        "action_type": "order.place",
+        "execution_result": {
+          "action_id": "parent-action",
+          "action_type": "order.place",
+          "client_order_id": "parent-client-order",
+          "exchange_order_id": "exchange-parent-action",
+          "mode": "dry_run",
+          "raw_response": {},
+          "status": "accepted"
+        },
+        "execution_started_sequence": 7,
+        "requested_sequence": 4
+      }
+    },
+    {
+      "event_type": "order.placement_recorded",
+      "payload": {
+        "action_id": "parent-action",
+        "exchange_order_id": "exchange-parent-action",
+        "limit_price": "100",
+        "logical_order_id": "parent-action",
+        "metadata": {},
+        "placement_id": "parent-action",
+        "placement_kind": "initial",
+        "placement_status": "accepted",
+        "product_id": "SHB-26JUN26-CDE",
+        "schema_version": 1,
+        "side": "buy",
+        "size": "0.2",
+        "venue_client_order_id": "parent-client-order"
+      }
+    },
+    {
+      "event_type": "exchange.fill",
+      "payload": {
+        "fill_id": "fill-1",
+        "order_id": "exchange-parent-action",
+        "price": "100",
+        "product_id": "SHB-26JUN26-CDE",
+        "side": "BUY",
+        "size": "0.1",
+        "trade_id": "trade-1"
+      }
+    }
+  ],
+  "expectations": {
+    "status": "ok",
+    "accepted_action_count": 1,
+    "rejected_action_count": 0,
+    "completed_count": 1,
+    "failed_count": 0,
+    "intent_count": 1,
+    "action_previews": [
+      {
+        "strategy_id": "followup-on-fill-manager",
+        "action_id": "act-followup-on-fill-fill-followup-af-26a229e02aed994cf310",
+        "status": "accepted",
+        "command_payload": {
+          "lineage_relation": "followup_after_fill",
+          "logical_order_id": "act-followup-on-fill-fill-followup-af-26a229e02aed994cf310",
+          "parent_order_id": "parent-action",
+          "post_only": true,
+          "product_id": "SHB-26JUN26-CDE",
+          "reduce_only": false,
+          "root_order_id": "parent-action",
+          "side": "sell",
+          "size": "0.1",
+          "source_order_ids": ["parent-action"],
+          "metadata": {
+            "followup_after_fill": {
+              "fill_id": "fill-1",
+              "parent_action_id": "parent-action",
+              "parent_logical_order_id": "parent-action"
+            }
+          }
+        }
+      }
+    ]
+  }
+}

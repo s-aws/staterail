@@ -1,0 +1,154 @@
+{
+  "schema_version": 1,
+  "name": "passive-market-making-stages-hidden-quotes",
+  "execution_mode": "dry_run",
+  "strategy_ids": ["passive-market-making"],
+  "events": [
+    {
+      "event_type": "exchange.product_snapshot",
+      "payload": {
+        "product_count": 1,
+        "product_ids": ["SHB-26JUN26-CDE"],
+        "products": [
+          {
+            "base_increment": "0.01",
+            "base_max_size": "1",
+            "base_min_size": "0.01",
+            "cancel_only": false,
+            "is_disabled": false,
+            "limit_only": false,
+            "post_only": false,
+            "price_increment": "0.01",
+            "product_id": "SHB-26JUN26-CDE",
+            "product_type": "FUTURE",
+            "product_venue": "FCM",
+            "quote_max_size": "1000",
+            "quote_min_size": "1",
+            "trading_disabled": false,
+            "tradable_for_new_orders": true,
+            "view_only": false
+          }
+        ]
+      }
+    },
+    {
+      "event_type": "data.received",
+      "payload": {
+        "message_event_type": "data.received",
+        "message_key": "coinbase:l2_data:SHB-26JUN26-CDE:1",
+        "payload": {
+          "channel": "l2_data",
+          "raw": {
+            "channel": "l2_data",
+            "events": [
+              {
+                "product_id": "SHB-26JUN26-CDE",
+                "type": "snapshot",
+                "updates": [
+                  {
+                    "new_quantity": "5",
+                    "price_level": "99",
+                    "side": "bid"
+                  },
+                  {
+                    "new_quantity": "5",
+                    "price_level": "101",
+                    "side": "offer"
+                  }
+                ]
+              }
+            ],
+            "sequence_num": 1
+          },
+          "sequence_num": 1
+        },
+        "source_id": "scenario-cfm-market-primary"
+      }
+    },
+    {
+      "event_type": "data.accepted",
+      "payload": {
+        "message_event_type": "data.received",
+        "message_key": "coinbase:l2_data:SHB-26JUN26-CDE:1",
+        "received_sequence": 2,
+        "source_id": "scenario-cfm-market-primary"
+      }
+    }
+  ],
+  "expectations": {
+    "status": "ok",
+    "accepted_action_count": 2,
+    "rejected_action_count": 0,
+    "completed_count": 1,
+    "failed_count": 0,
+    "intent_count": 2,
+    "action_previews": [
+      {
+        "strategy_id": "passive-market-making",
+        "action_id": "act-passive-market-m-quote-staged-rel-60c3ec43c4001759bedf",
+        "status": "accepted",
+        "command_payload": {
+          "leverage": "1",
+          "limit_price": "99.50",
+          "lineage_relation": "root",
+          "logical_order_id": "act-passive-market-m-quote-logical-21d4f1ceb75ffb2abcbb",
+          "margin_type": "cross",
+          "metadata": {
+            "passive_market_making": {
+              "ask_price": "100.50",
+              "bid_price": "99.50",
+              "half_spread_bps": "50",
+              "midpoint": "100",
+              "product_id": "SHB-26JUN26-CDE",
+              "side": "buy"
+            },
+            "staged_release": {
+              "chunk_count": 1,
+              "chunk_index": 1,
+              "size": "0.05"
+            }
+          },
+          "placement_kind": "staged_release",
+          "post_only": true,
+          "product_id": "SHB-26JUN26-CDE",
+          "reduce_only": false,
+          "side": "buy",
+          "size": "0.05"
+        }
+      },
+      {
+        "strategy_id": "passive-market-making",
+        "action_id": "act-passive-market-m-quote-staged-rel-4cf9fdbad2e1ef7b8a58",
+        "status": "accepted",
+        "command_payload": {
+          "leverage": "1",
+          "limit_price": "100.50",
+          "lineage_relation": "root",
+          "logical_order_id": "act-passive-market-m-quote-logical-a9d7c16dbe2d123a3078",
+          "margin_type": "cross",
+          "metadata": {
+            "passive_market_making": {
+              "ask_price": "100.50",
+              "bid_price": "99.50",
+              "half_spread_bps": "50",
+              "midpoint": "100",
+              "product_id": "SHB-26JUN26-CDE",
+              "side": "sell"
+            },
+            "staged_release": {
+              "chunk_count": 1,
+              "chunk_index": 1,
+              "size": "0.05"
+            }
+          },
+          "placement_kind": "staged_release",
+          "post_only": true,
+          "product_id": "SHB-26JUN26-CDE",
+          "reduce_only": false,
+          "side": "sell",
+          "size": "0.05"
+        }
+      }
+    ]
+  }
+}

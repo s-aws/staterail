@@ -1,0 +1,45 @@
+{
+  "schema_version": 1,
+  "name": "staged-order-preview",
+  "execution_mode": "dry_run",
+  "strategy_ids": ["staged-order-fixture"],
+  "static_strategies": [
+    {
+      "strategy_id": "staged-order-fixture",
+      "metadata": {
+        "purpose": "scenario-only order intent fixture"
+      },
+      "intents": [
+        {
+          "action_type": "order.place",
+          "action_id": "staged-order-fixture-entry-1",
+          "product_id": "BTC-USD",
+          "side": "buy",
+          "order_type": "limit",
+          "size": "0.01",
+          "limit_price": "50000",
+          "time_in_force": "good_until_cancelled",
+          "post_only": true,
+          "reduce_only": false,
+          "placement_kind": "staged_release"
+        }
+      ]
+    }
+  ],
+  "events": [],
+  "expectations": {
+    "status": "ok",
+    "accepted_action_count": 1,
+    "rejected_action_count": 0,
+    "completed_count": 1,
+    "failed_count": 0,
+    "intent_count": 1,
+    "action_previews": [
+      {
+        "strategy_id": "staged-order-fixture",
+        "action_id": "staged-order-fixture-entry-1",
+        "status": "accepted"
+      }
+    ]
+  }
+}

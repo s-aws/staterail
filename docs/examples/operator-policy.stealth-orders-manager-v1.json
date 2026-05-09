@@ -1,0 +1,98 @@
+{
+  "schema_version": 1,
+  "policy_name": "stealth_orders_manager_policy_v1",
+  "scope": {
+    "products": [
+      "SHB-26JUN26-CDE",
+      "AVA-29MAY26-CDE"
+    ],
+    "venue": "coinbase_cfm",
+    "live_orders_allowed": true
+  },
+  "risk_limits": {
+    "max_order_notional_usd": "200",
+    "max_daily_notional_usd": "400",
+    "max_open_orders": 5,
+    "allowed_sides": [
+      "buy",
+      "sell"
+    ],
+    "reduce_only_first": false,
+    "kill_switch_enabled": true
+  },
+  "market_data_requirements": {
+    "require_order_book": true,
+    "max_order_book_age_seconds": 10,
+    "require_product_metadata": true,
+    "require_redundant_feeds": false
+  },
+  "order_behavior": {
+    "default_order_type": "limit",
+    "default_leverage": "1",
+    "default_margin_type": "cross",
+    "allow_market_orders": false,
+    "post_only": true,
+    "time_in_force": "good_until_cancelled"
+  },
+  "lineage": {
+    "model": "flat_root",
+    "allow_manual_adoption": true,
+    "followup_on_fill": "allowed",
+    "move_same_side_orders": "allowed",
+    "split_orders": "allowed",
+    "merge_orders": "allowed"
+  },
+  "partial_fills": {
+    "followup_enabled": true,
+    "followup_size_mode": "percent_of_filled_size",
+    "followup_percent": "100",
+    "min_followup_notional_usd": "1"
+  },
+  "moves": {
+    "min_price_change_ticks": 1,
+    "cooldown_seconds": 5,
+    "cancel_replace_when_amend_not_supported": true
+  },
+  "staged_or_hidden_release": {
+    "allow_release": true,
+    "enabled": true,
+    "release_only_when_conditions_match": true,
+    "max_visible_notional_usd": "200"
+  },
+  "anchor_repricing": {
+    "enabled": true,
+    "reference_price_source": "midpoint",
+    "distance_type": "percent",
+    "target_distance": "0.01",
+    "max_distance": "0.05",
+    "update_mode": "adaptive",
+    "min_price_change": "0.01",
+    "hysteresis_bps": "5",
+    "min_reprice_interval_seconds": 30,
+    "max_reprices_per_hour": 20,
+    "slide_mode": false,
+    "max_step_per_reprice": "5",
+    "post_only_required": true,
+    "follow_up_retreat_distance": "0.0005",
+    "follow_up_retreat_jitter": "0.5"
+  },
+  "sizing": {
+    "strategy": "fixed",
+    "tranche_schedule": [
+      "0.25",
+      "0.50",
+      "0.75",
+      "1.0"
+    ],
+    "iceberg_mode": true,
+    "adaptive_base_size": null,
+    "adaptive_reveal_multiplier": "0.1",
+    "adaptive_max_reveal_percentage": "0.5",
+    "adaptive_volume_window_seconds": 60
+  },
+  "max_order_replacements": 11,
+  "target_movement": "0.002",
+  "target_movement_type": "percent",
+  "allow_partial_fills": true,
+  "enable_hotpoint_replication": false
+}

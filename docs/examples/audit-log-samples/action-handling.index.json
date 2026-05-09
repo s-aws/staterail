@@ -1,0 +1,85 @@
+{
+  "schema_version": 1,
+  "sample_ledger": "action-handling.jsonl",
+  "description": "Sanitized replayable audit-log sample showing accepted, rejected, staged, venue-rejected, and executor-failed action handling.",
+  "cases": [
+    {
+      "case_id": "accepted_order_placement",
+      "title": "Accepted Order Placement",
+      "sequence_start": 1,
+      "sequence_end": 6,
+      "outcome": "accepted",
+      "primary_events": [
+        "action.requested",
+        "action.accepted",
+        "action.execution_started",
+        "action.executed",
+        "order.placement_recorded"
+      ]
+    },
+    {
+      "case_id": "accepted_cancel",
+      "title": "Accepted Cancel",
+      "sequence_start": 7,
+      "sequence_end": 10,
+      "outcome": "cancelled",
+      "primary_events": [
+        "action.requested",
+        "action.accepted",
+        "action.execution_started",
+        "action.executed"
+      ]
+    },
+    {
+      "case_id": "risk_rejected_order",
+      "title": "Risk-Rejected Order",
+      "sequence_start": 11,
+      "sequence_end": 12,
+      "outcome": "rejected_before_execution",
+      "primary_events": [
+        "action.requested",
+        "action.rejected"
+      ]
+    },
+    {
+      "case_id": "staged_order",
+      "title": "Staged Placement",
+      "sequence_start": 13,
+      "sequence_end": 16,
+      "outcome": "staged_without_execution",
+      "primary_events": [
+        "action.requested",
+        "action.accepted",
+        "order.logical_created",
+        "order.placement_recorded"
+      ]
+    },
+    {
+      "case_id": "venue_rejected_order",
+      "title": "Venue-Rejected Order",
+      "sequence_start": 17,
+      "sequence_end": 21,
+      "outcome": "failed_after_execution_rejected",
+      "primary_events": [
+        "action.requested",
+        "action.accepted",
+        "action.execution_started",
+        "action.execution_failed"
+      ]
+    },
+    {
+      "case_id": "executor_failed_order",
+      "title": "Executor Failure",
+      "sequence_start": 22,
+      "sequence_end": 27,
+      "outcome": "failed_after_executor_error",
+      "primary_events": [
+        "action.requested",
+        "action.accepted",
+        "action.execution_started",
+        "error",
+        "action.execution_failed"
+      ]
+    }
+  ]
+}

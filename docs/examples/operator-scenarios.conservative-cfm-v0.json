@@ -1,0 +1,204 @@
+{
+  "schema_version": 1,
+  "policy_name": "conservative_cfm_policy_v0",
+  "scenarios": [
+    {
+      "scenario": "hard_safety_stop",
+      "given": {
+        "daily_notional_used_usd": "100",
+        "max_daily_notional_usd": "100"
+      },
+      "when": {
+        "strategy_requests_new_order": true
+      },
+      "expect": {
+        "action_rejected": true,
+        "no_order_submitted": true
+      }
+    },
+    {
+      "scenario": "stale_data_blocks_action",
+      "given": {
+        "product": "SHB-26JUN26-CDE",
+        "latest_order_book_age_seconds": 30,
+        "max_allowed_age_seconds": 5
+      },
+      "when": {
+        "strategy_evaluates": true
+      },
+      "expect": {
+        "action_count": 0,
+        "attention_required": true
+      }
+    },
+    {
+      "scenario": "move_same_side_order",
+      "given": {
+        "existing_order": {
+          "side": "buy",
+          "size": "2",
+          "price": "100"
+        },
+        "new_desired_price": "99"
+      },
+      "when": {
+        "venue_supports_amend": false
+      },
+      "expect": {
+        "cancel_original": true,
+        "place_replacement": true,
+        "preserve_logical_order_id": true
+      }
+    },
+    {
+      "scenario": "filled_order_creates_followup",
+      "given": {
+        "parent_order": {
+          "side": "buy",
+          "size": "10",
+          "filled_size": "2",
+          "price": "100"
+        }
+      },
+      "when": {
+        "fill_confirmed": true
+      },
+      "expect": {
+        "child_order": {
+          "side": "sell",
+          "size": "2",
+          "linked_to_parent": true
+        }
+      }
+    },
+    {
+      "scenario": "tidy_nearby_orders",
+      "given": {
+        "open_orders": [
+          {
+            "side": "sell",
+            "size": "1",
+            "price": "100"
+          },
+          {
+            "side": "sell",
+            "size": "1",
+            "price": "100"
+          }
+        ]
+      },
+      "when": {
+        "consolidation_enabled": true
+      },
+      "expect": {
+        "cancel_originals": true,
+        "create_merged_order": {
+          "side": "sell",
+          "size": "2",
+          "price": "100"
+        },
+        "lineage_relation": "consolidation"
+      }
+    },
+    {
+      "scenario": "anchor_repricing_forced",
+      "given": {
+        "order_price": "100",
+        "reference_price": "105",
+        "max_distance": "0.05"
+      },
+      "when": {
+        "market_moves": true
+      },
+      "expect": {
+        "order_repriced_to": "100.0"
+      }
+    },
+    {
+      "scenario": "tranche_release",
+      "given": {
+        "total_size": "4",
+        "tranche_schedule": [
+          "0.25",
+          "0.50",
+          "0.75",
+          "1.0"
+        ]
+      },
+      "when": {
+        "each_tranche_triggered": true
+      },
+      "expect": {
+        "order_sizes": [
+          "1",
+          "1",
+          "1",
+          "1"
+        ],
+        "only_one_live_at_a_time": true
+      }
+    },
+    {
+      "scenario": "adaptive_sizing",
+      "given": {
+        "base_size": "2",
+        "market_vol": "100",
+        "baseline_vol": "50",
+        "multiplier": "0.1"
+      },
+      "when": {
+        "adaptive_strategy_active": true
+      },
+      "expect": {
+        "slice_size": "0.4"
+      }
+    },
+    {
+      "scenario": "slide_mode_enabled",
+      "given": {
+        "current_price": "100",
+        "desired_price": "90",
+        "max_step_per_reprice": "5"
+      },
+      "when": {
+        "reprice_triggered": true
+      },
+      "expect": {
+        "next_price": "95"
+      }
+    },
+    {
+      "scenario": "followup_partial_fill",
+      "given": {
+        "parent_order": {
+          "side": "buy",
+          "size": "10",
+          "filled_size": "3"
+        }
+      },
+      "when": {
+        "fill_confirmed": true
+      },
+      "expect": {
+        "child_order": {
+          "side": "sell",
+          "size": "3",
+          "linked_to_parent": true
+        }
+      }
+    },
+    {
+      "scenario": "hotpoint_auto_replicate",
+      "given": {
+        "enable_hotpoint_replication": true,
+        "fills_repeat_in_same_bucket": true
+      },
+      "when": {
+        "fill_detected": true
+      },
+      "expect": {
+        "auto_place_additional_order": true
+      }
+    }
+  ]
+}

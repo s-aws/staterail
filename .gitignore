@@ -1,0 +1,69 @@
+# Python bytecode and caches
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.pytest_tmp/
+pytest_tmp/
+.coverage
+coverage.xml
+htmlcov/
+
+# Virtual environments and local tooling
+.venv/
+venv/
+env/
+ENV/
+.mypy_cache/
+.ruff_cache/
+.pyre/
+.tox/
+
+# Build and packaging output
+build/
+dist/
+*.egg-info/
+
+# Runtime data and local secrets
+data/
+test_runtime/
+*.log
+*.env
+.env
+.env.*
+!.env.example
+config.local.json
+
+# OS and editor noise
+.DS_Store
+Thumbs.db
+desktop.ini
+.vscode/
+!.vscode/settings.json
+!.vscode/extensions.json
+
+# More test/tool caches
+.coverage.*
+.hypothesis/
+.nox/
+
+# Local IDEs
+.idea/
+
+# Agent/local assistant state
+.agents/
+.codex/
+
+# Local credentials and key material
+*.pem
+*.key
+*.p8
+*.p12
+
+# Local config variants
+config.*.local.json
+*.local.json
+
+# Local operator notes
+docs/runbooks/*.local.md
+docs/runbooks/private/

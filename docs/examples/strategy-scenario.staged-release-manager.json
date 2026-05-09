@@ -1,0 +1,141 @@
+{
+  "schema_version": 1,
+  "name": "staged-release-manager-releases-existing-stage",
+  "execution_mode": "dry_run",
+  "strategy_ids": ["staged-release-manager"],
+  "events": [
+    {
+      "event_type": "data.received",
+      "payload": {
+        "message_event_type": "data.received",
+        "message_key": "coinbase:l2_data:SHB-26JUN26-CDE:1",
+        "payload": {
+          "channel": "l2_data",
+          "raw": {
+            "channel": "l2_data",
+            "events": [
+              {
+                "product_id": "SHB-26JUN26-CDE",
+                "type": "snapshot",
+                "updates": [
+                  {
+                    "new_quantity": "5",
+                    "price_level": "99",
+                    "side": "bid"
+                  },
+                  {
+                    "new_quantity": "5",
+                    "price_level": "101",
+                    "side": "offer"
+                  }
+                ]
+              }
+            ],
+            "sequence_num": 1
+          },
+          "sequence_num": 1
+        },
+        "source_id": "scenario-cfm-market-primary"
+      }
+    },
+    {
+      "event_type": "data.accepted",
+      "payload": {
+        "message_event_type": "data.received",
+        "message_key": "coinbase:l2_data:SHB-26JUN26-CDE:1",
+        "received_sequence": 1,
+        "source_id": "scenario-cfm-market-primary"
+      }
+    },
+    {
+      "event_type": "action.requested",
+      "payload": {
+        "action_id": "stage-shb-1",
+        "action_type": "order.place",
+        "idempotency_key": "client-stage-shb-1",
+        "payload": {
+          "limit_price": "100",
+          "logical_order_id": "logical-stage-shb-1",
+          "order_type": "limit",
+          "placement_kind": "staged_release",
+          "post_only": true,
+          "product_id": "SHB-26JUN26-CDE",
+          "reduce_only": false,
+          "side": "buy",
+          "size": "0.1",
+          "time_in_force": "good_until_cancelled"
+        }
+      }
+    },
+    {
+      "event_type": "order.logical_created",
+      "payload": {
+        "created_by_action_id": "stage-shb-1",
+        "lineage_relation": "root",
+        "limit_price": "100",
+        "logical_order_id": "logical-stage-shb-1",
+        "metadata": {},
+        "parent_order_id": null,
+        "product_id": "SHB-26JUN26-CDE",
+        "root_order_id": "logical-stage-shb-1",
+        "schema_version": 1,
+        "side": "buy",
+        "size": "0.1",
+        "source_order_ids": []
+      }
+    },
+    {
+      "event_type": "order.placement_recorded",
+      "payload": {
+        "action_id": "stage-shb-1",
+        "exchange_order_id": null,
+        "limit_price": "100",
+        "logical_order_id": "logical-stage-shb-1",
+        "metadata": {
+          "staged_release": {
+            "chunk_count": 1,
+            "chunk_index": 1,
+            "size": "0.1"
+          }
+        },
+        "placement_id": "stage-shb-1",
+        "placement_kind": "staged_release",
+        "placement_status": "staged",
+        "product_id": "SHB-26JUN26-CDE",
+        "schema_version": 1,
+        "side": "buy",
+        "size": "0.1",
+        "venue_client_order_id": null
+      }
+    }
+  ],
+  "expectations": {
+    "status": "ok",
+    "accepted_action_count": 1,
+    "rejected_action_count": 0,
+    "completed_count": 1,
+    "failed_count": 0,
+    "intent_count": 1,
+    "action_previews": [
+      {
+        "strategy_id": "staged-release-manager",
+        "action_id": "act-staged-release-m-release-release-1a25bee7b76e884ead3a",
+        "status": "accepted",
+        "command_payload": {
+          "logical_order_id": "logical-stage-shb-1",
+          "metadata": {
+            "staged_release": {
+              "release_of_action_id": "stage-shb-1",
+              "release_of_placement_id": "stage-shb-1"
+            }
+          },
+          "placement_kind": "release",
+          "post_only": true,
+          "product_id": "SHB-26JUN26-CDE",
+          "side": "buy",
+          "size": "0.1"
+        }
+      }
+    ]
+  }
+}
