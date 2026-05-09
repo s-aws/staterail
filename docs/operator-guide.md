@@ -17,8 +17,10 @@ Strategies are not an operator console. Strategies may emit intents, but they sh
 
 Do not use a strategy as the first live canary order.
 
-The first live canary order for an operator account should use a dedicated one-shot operator place-order command that:
+The first live canary order for an operator account should start with the read-only canary plan, then use a dedicated one-shot operator place-order command that:
 
+- checks the dry-run and live config split before any order endpoint is called
+- prints the exact dry-run, live placement, cleanup, replay, and health commands
 - submits exactly one order through the existing action gateway
 - records an operator ID and reason
 - requires explicit product, side, size, order type, time in force, reason, and limit price
@@ -28,7 +30,7 @@ The first live canary order for an operator account should use a dedicated one-s
 - prints the audited action receipt and venue order identifiers
 - is immediately followed by operator open-order inspection, cancel, exchange-state smoke, replay, and ledger health
 
-The operator place-order command is the only recommended first live canary path. Do not substitute a scheduled strategy run for this step.
+The canary plan plus operator place-order command is the only recommended first live canary path. Do not substitute a scheduled strategy run for this step.
 
 ## Operator Progression
 
@@ -43,19 +45,29 @@ Use this order when bringing a real account online:
 7. Run strategy simulation without order submission.
 8. Run staged-only strategy evaluation.
 9. Run restart and recovery drills.
-10. Run one dry-run operator place-order.
-11. Place one tiny post-only live canary order.
-12. Cancel immediately and verify final ledger health.
+10. Render an isolated dry-run canary config from the live config.
+11. Generate a clean read-only operator canary plan.
+12. Run the planned dry-run operator place-order and dry-run cleanup.
+13. Run the planned live preflight/gate sequence.
+14. Place one tiny post-only live canary order.
+15. Cancel immediately and verify final ledger health.
 
 Any attention result stops the progression until reviewed.
+
+If the live config has no scheduled strategies enabled, the canary plan skips strategy simulation. If scheduled strategies are enabled, the plan includes simulation qualification immediately before the live runtime gate.
+
+Use a separate dry-run canary config. Prefer rendering it from the live config with the dedicated command so it keeps the same risk scope while using a separate dry-run ledger path, `bot.rest.execution_mode=dry_run`, no REST-backed reconciliation, no scheduled strategies, no product-catalog refresh, no audit publication, and no websocket sources.
 
 ## Required Operator Commands
 
 The current operator command surface includes:
 
 ```powershell
+python -m app.main --config-file config.local.json --operator-canary-render-dry-run-config --operator-canary-dry-run-config-file config.canary-dry-run.local.json --operator-canary-dry-run-ledger-path data/canary-dry-run-audit.local.jsonl --operator-canary-dry-run-config-force
+python -m app.main --config-file config.local.json --operator-canary-plan --operator-canary-dry-run-config-file config.canary-dry-run.local.json --operator-id "$env:USERNAME" --operator-place-product-id "<product-id>" --operator-place-side buy --operator-place-size "1" --operator-place-limit-price "<limit-price>" --operator-place-leverage "1" --operator-place-order-type limit --operator-place-time-in-force good_until_cancelled --operator-place-post-only --operator-place-reason "first operator canary"
+python -m app.main --config-file config.canary-dry-run.local.json --operator-place-order --operator-id "$env:USERNAME" --operator-place-product-id "<product-id>" --operator-place-side buy --operator-place-size "1" --operator-place-limit-price "<limit-price>" --operator-place-leverage "1" --operator-place-order-type limit --operator-place-time-in-force good_until_cancelled --operator-place-post-only --operator-place-reason "first operator canary dry run"
+python -m app.main --config-file config.canary-dry-run.local.json --operator-cancel-all-open-orders --operator-id "$env:USERNAME" --operator-cancel-product-id "<product-id>" --operator-cancel-action-id-prefix "operator-canary-dry-run-cancel" --operator-cancel-reason "first operator canary dry-run cleanup"
 python -m app.main --config-file config.local.json --operator-open-orders
-python -m app.main --config-file config.local.json --operator-place-order --operator-id "$env:USERNAME" --operator-place-product-id "<product-id>" --operator-place-side buy --operator-place-size "1" --operator-place-limit-price "<limit-price>" --operator-place-leverage "1" --operator-place-order-type limit --operator-place-time-in-force good_until_cancelled --operator-place-post-only --operator-place-reason "first operator canary dry run"
 python -m app.main --config-file config.local.json --operator-cancel-order --operator-id "$env:USERNAME" --operator-cancel-exchange-order-id "<exchange-order-id>" --operator-cancel-reason "operator cleanup"
 python -m app.main --config-file config.local.json --operator-cancel-all-open-orders --operator-id "$env:USERNAME" --operator-cancel-product-id "<product-id>" --operator-cancel-action-id-prefix "operator-cancel" --operator-cancel-reason "operator cleanup"
 ```

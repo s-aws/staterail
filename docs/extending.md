@@ -168,8 +168,26 @@ top = snapshot.best_bid_ask("AVA-29MAY26-CDE")
 midpoint = snapshot.midpoint("AVA-29MAY26-CDE")
 spread = snapshot.spread("AVA-29MAY26-CDE")
 book = snapshot.order_book_stats("AVA-29MAY26-CDE", levels=5)
+book_window = snapshot.order_book_sample_window(
+    "AVA-29MAY26-CDE",
+    lookback=timedelta(minutes=5),
+)
+book_window_stats = snapshot.order_book_window_stats(
+    "AVA-29MAY26-CDE",
+    levels=5,
+    lookback=timedelta(minutes=5),
+)
 latest_trade = snapshot.latest_trade("AVA-29MAY26-CDE")
+series_window = snapshot.market_series_window(
+    "AVA-29MAY26-CDE",
+    lookback=timedelta(minutes=5),
+)
 window = snapshot.trade_window("AVA-29MAY26-CDE", lookback=timedelta(minutes=5))
+retained_window = snapshot.trade_window(
+    "AVA-29MAY26-CDE",
+    lookback=timedelta(minutes=5),
+    max_retained_trades=500,
+)
 stats = snapshot.market_window_stats("AVA-29MAY26-CDE", lookback=timedelta(minutes=5))
 candles = snapshot.candles(
     "AVA-29MAY26-CDE",
@@ -195,7 +213,7 @@ exposure = snapshot.product_exposure("AVA-29MAY26-CDE")
 capacity = snapshot.order_capacity("AVA-29MAY26-CDE", side=OrderSide.BUY)
 ```
 
-Market-data helpers return typed StateRail result objects with `status`, `is_ok`, replay sequence fields, observed timestamps where available, and `to_payload()` for strategy metadata. `trade_window()` is the canonical replay-derived accepted-trade window; market-window stats, candles, rolling count, and rolling volume helpers share that same window-selection path. Candle buckets are aligned to the requested replay window from `evaluated_at - lookback` forward by fixed intervals; empty buckets are returned explicitly as `missing`. `order_book_stats()` reads the latest replayed book snapshot and requires one explicit depth filter: `levels=...` or `max_distance_bps=...`. These are projection-backed strategy helpers, not a standalone historical market-data storage or backtesting subsystem. A strategy should return metadata first while validating a new signal; it should emit order intents only after scenario and simulation coverage prove the helper behavior.
+Market-data helpers return typed StateRail result objects with `status`, `is_ok`, replay sequence fields, observed timestamps where available, and `to_payload()` for strategy metadata. `market_series_window()` exposes the normalized time contract used by replay-derived trade helpers: product, `as_of`, `window_start`, `window_end`, `lookback`, `time_field`, `membership_rule`, and optional retention limit. `trade_window()` is the canonical replay-derived accepted-trade window; market-window stats, candles, rolling count, and rolling volume helpers share that same window-selection path. Time `lookback` defines the window. `max_retained_trades` is an optional helper-level retention cap applied after time filtering, not a replacement for the time window. Capped results report `retention_limit` and `retention_dropped_trade_count`. Operators can also configure `bot.strategies.max_market_trades_per_product` to cap accepted trades retained per product during strategy snapshot replay; the replayed projection reports dropped-trade counts in `market_trade_retention`. `order_book_stats()` reads the latest replayed book snapshot and requires one explicit depth filter: `levels=...` or `max_distance_bps=...`. `order_book_sample_window()` reads retained replay-backed book samples and reports `insufficient_data` unless at least `min_samples` samples exist inside the requested time window. `order_book_window_stats()` uses the same sample window and depth filter to summarize spread, midpoint, bid/ask volume, and book imbalance over time. The default snapshot replay cap keeps only one book sample per product; configure `bot.strategies.max_order_book_samples_per_product` above `1` before using historical book-sample windows. Configure `bot.strategies.max_order_book_sample_depth_per_side` when retained samples should keep only top-of-book depth; the latest-book projection remains full-depth. Strategy logic that requires complete 5-minute history should not use caps, or should reject results/snapshots where retained trades or book samples were dropped. Candle buckets are aligned to the requested replay window from `evaluated_at - lookback` forward by fixed intervals; empty buckets are returned explicitly as `missing`, and bucket membership rules are reported in candle payloads. These are projection-backed strategy helpers, not a standalone historical market-data storage or backtesting subsystem. A strategy should return metadata first while validating a new signal; it should emit order intents only after scenario and simulation coverage prove the helper behavior.
 
 Product-rule validation helpers report typed failures and never round. Increment proposal helpers are explicitly named as proposals and require an `IncrementRoundingMode`, so strategy authors can separate "is this valid?" from "what nearby valid value could I use?"
 

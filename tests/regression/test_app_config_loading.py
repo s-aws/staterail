@@ -92,6 +92,9 @@ def test_load_application_config_from_mapping_converts_raw_values_to_typed_confi
                             "product_id": "BTC-USD",
                         }
                     ],
+                    "max_market_trades_per_product": 500,
+                    "max_order_book_sample_depth_per_side": 10,
+                    "max_order_book_samples_per_product": 25,
                     "operator_policy_file": "docs/examples/operator-policy.conservative-cfm-v0.json",
                     "run_on_start": False,
                     "strategy_ids": ["noop"],
@@ -239,6 +242,9 @@ def test_load_application_config_from_mapping_converts_raw_values_to_typed_confi
     assert config.bot.strategies.market_data_requirements[0].data_kind == MarketDataKind.TICKER
     assert config.bot.strategies.market_data_requirements[0].max_age == timedelta(seconds=3)
     assert config.bot.strategies.market_data_requirements[0].product_id == "BTC-USD"
+    assert config.bot.strategies.max_market_trades_per_product == 500
+    assert config.bot.strategies.max_order_book_sample_depth_per_side == 10
+    assert config.bot.strategies.max_order_book_samples_per_product == 25
     assert config.bot.strategies.operator_policy is not None
     assert config.bot.strategies.operator_policy.policy_name == "conservative_cfm_policy_v0"
     assert config.bot.strategies.allow_live_execution is True
@@ -513,6 +519,9 @@ def test_load_application_config_from_env_converts_strings_to_typed_config(works
                 }
             ]
         ),
+        "STATERAIL_STRATEGIES_MAX_MARKET_TRADES_PER_PRODUCT": "250",
+        "STATERAIL_STRATEGIES_MAX_ORDER_BOOK_SAMPLE_DEPTH_PER_SIDE": "5",
+        "STATERAIL_STRATEGIES_MAX_ORDER_BOOK_SAMPLES_PER_PRODUCT": "20",
         "STATERAIL_STRATEGIES_OPERATOR_POLICY_FILE": "docs/examples/operator-policy.conservative-cfm-v0.json",
         "STATERAIL_STRATEGIES_RUN_ON_START": "false",
         "STATERAIL_STRATEGY_IDS": "noop",
@@ -592,6 +601,9 @@ def test_load_application_config_from_env_converts_strings_to_typed_config(works
     assert config.bot.strategies.market_data_requirements[0].data_kind == MarketDataKind.ORDER_BOOK
     assert config.bot.strategies.market_data_requirements[0].max_age == timedelta(seconds=2)
     assert config.bot.strategies.market_data_requirements[0].product_id == "BTC-USD"
+    assert config.bot.strategies.max_market_trades_per_product == 250
+    assert config.bot.strategies.max_order_book_sample_depth_per_side == 5
+    assert config.bot.strategies.max_order_book_samples_per_product == 20
     assert config.bot.strategies.operator_policy is not None
     assert config.bot.strategies.operator_policy.policy_name == "conservative_cfm_policy_v0"
     assert config.bot.strategies.allow_live_execution is True

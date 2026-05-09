@@ -16,10 +16,12 @@ StateRail's primary goal is reliable, replayable execution infrastructure:
 
 ### Controlled Coinbase Canary Flow
 
-Use the audited operator command surface to define a repeatable first-live-order workflow:
+Use the audited operator command surface as the repeatable first-live-order workflow:
 
-- Dry-run one explicit post-only limit order through the gateway and risk gate.
-- Run the same command live only after readiness, no-order preflight, simulation qualification, and live runtime gate are clean.
+- Render an isolated dry-run canary config from the live config while preserving risk scope.
+- Generate a read-only canary plan that checks the dry-run/live configs and prints the exact operator command sequence.
+- Dry-run one explicit post-only limit order through the gateway and risk gate, then clean it up.
+- Run the same command live only after readiness, no-order preflight, simulation qualification when strategies are enabled, and live runtime gate are clean.
 - Immediately inspect open orders, cancel the canary, replay source-of-truth state, run ledger health, and record recovery evidence.
 - Keep the canary product scope small and Coinbase spot/CFM-focused until the venue contract has more live evidence.
 
@@ -27,17 +29,22 @@ Use the audited operator command surface to define a repeatable first-live-order
 
 Current strategy helpers expose replay-derived market data retained in the source-of-truth projection:
 
+- Normalized market-series window contracts: product, `as_of`, start/end bounds, lookback, time field, membership rule, and optional retention limit.
 - Market-window statistics: base volume, quote volume, VWAP, TWAP, open, high, low, close, realized volatility, buy volume, sell volume, and aggressor volume.
 - Order-book statistics: best bid, best ask, spread, spread bps, midpoint, microprice, bid volume, ask volume, top bid size, top ask size, imbalance, and weighted mid.
-- Bounded trade windows, candles, rolling trade volume, and rolling trade count over accepted trades retained in replayed state.
+- Time-bounded trade windows, candles, rolling trade volume, and rolling trade count over accepted trades retained in replayed state, with optional retained-trade caps that report when trades are dropped.
+- Configurable strategy snapshot replay limits for retained accepted trades per product.
+- Replay-backed order-book sample windows with configurable per-product sample retention and insufficient-data status when only the latest book is retained.
+- Derived order-book window statistics over retained samples, including spread, midpoint, bid/ask volume, and book imbalance.
+- Optional retained order-book sample depth caps that reduce historical sample memory without changing latest-book state.
 
-These helpers are not yet a standalone historical market-data subsystem. The next market-data work should separate three layers:
+These helpers are not yet a standalone historical market-data subsystem. Market-data work should keep three layers separate:
 
 - Current replayed market state: latest ticker, latest order book, retained accepted trades, and freshness checks.
-- Historical normalized market series: explicit tick/trade windows, candle construction contracts, bounded lookbacks, retention limits, and deterministic time anchors.
+- Historical normalized market series: explicit tick/trade windows, candle construction contracts, bounded lookbacks, deterministic time anchors, product scope limits, and retained sample-window extensions where strategy demand justifies them.
 - Derived strategy metrics: rolling volume, VWAP/TWAP, spread/midpoint/microprice, book imbalance, trade-flow imbalance, and volatility/regime metrics.
 
-Replay-backed historical order-book samples should be added only after the normalized series contracts are explicit enough to keep simulation, recovery, and strategy behavior deterministic.
+Further historical order-book metrics should be added only when retained sample-window contracts have enough replay evidence to keep simulation, recovery, and strategy behavior deterministic.
 
 Strategy authors should write against StateRail concepts. Venue adapters should translate venues into StateRail concepts. The ledger remains the source of truth between them.
 

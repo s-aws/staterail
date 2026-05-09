@@ -296,12 +296,26 @@ After a visible-release run, inspect summary, source of truth, ledger health, an
 
 ## Audited Operator Place Order
 
-Use the one-shot operator place-order command for the first canary order. It submits exactly one typed order intent through the normal action gateway, risk gate, and configured executor. It does not start scheduled runtime tasks or websocket feeds.
+Use the canary planner before the first live order. First render an isolated dry-run canary config from the live config. The rendered config keeps the live config risk scope, switches REST execution to dry-run, writes to a separate dry-run ledger, disables scheduled runtime work except harmless trigger polling, and removes websocket sources.
+
+```powershell
+python -m app.main --config-file config.local.json --operator-canary-render-dry-run-config --operator-canary-dry-run-config-file config.canary-dry-run.local.json --operator-canary-dry-run-ledger-path data/canary-dry-run-audit.local.jsonl --operator-canary-dry-run-config-force
+```
+
+The canary planner is read-only: it loads one dry-run config and one live config, checks the canary shape and configured risk scope, and prints the exact command sequence for dry-run placement, dry-run cleanup, live preflight, live placement, live inspection, live cancel, source-of-truth replay, and ledger health. It does not write the ledger, start runtime tasks, start websocket feeds, or call order endpoints.
+
+```powershell
+python -m app.main --config-file config.local.json --operator-canary-plan --operator-canary-dry-run-config-file config.canary-dry-run.local.json --operator-id "$env:USERNAME" --operator-place-product-id "SHB-26JUN26-CDE" --operator-place-side buy --operator-place-size "1" --operator-place-limit-price "100" --operator-place-leverage "1" --operator-place-order-type limit --operator-place-time-in-force good_until_cancelled --operator-place-post-only --operator-place-reason "Operator canary"
+```
+
+The live config supplied through `--config-file` must use live REST execution mode. The dry-run config supplied through `--operator-canary-dry-run-config-file` must use dry-run REST execution mode and should write to a separate dry-run ledger. Stop if the planner returns `attention_required`.
+
+Use the one-shot operator place-order command for the actual canary order after the plan is clean. It submits exactly one typed order intent through the normal action gateway, risk gate, and configured executor. It does not start scheduled runtime tasks or websocket feeds.
 
 Run the command in dry-run mode first:
 
 ```powershell
-python -m app.main --config-file config.local.json --operator-place-order --operator-id "$env:USERNAME" --operator-place-product-id "SHB-26JUN26-CDE" --operator-place-side buy --operator-place-size "1" --operator-place-limit-price "100" --operator-place-leverage "1" --operator-place-order-type limit --operator-place-time-in-force good_until_cancelled --operator-place-post-only --operator-place-reason "Operator dry-run canary"
+python -m app.main --config-file config.canary-dry-run.local.json --operator-place-order --operator-id "$env:USERNAME" --operator-place-product-id "SHB-26JUN26-CDE" --operator-place-side buy --operator-place-size "1" --operator-place-limit-price "100" --operator-place-leverage "1" --operator-place-order-type limit --operator-place-time-in-force good_until_cancelled --operator-place-post-only --operator-place-reason "Operator dry-run canary"
 ```
 
 The JSON response includes `receipt`, `logical_order_id`, `client_order_id`, `exchange_order_id` when available, and `status`. A non-`ok` status means the gateway, risk gate, or executor rejected or failed the action and the operator should stop before live placement.

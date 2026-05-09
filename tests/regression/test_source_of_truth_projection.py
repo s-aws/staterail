@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import pytest
+
 from audit.ledger import AuditLedger
 from core.engine import AuditCore
 from core.enums import (
@@ -287,6 +289,80 @@ def test_projection_tracks_order_book_and_trade_market_data(workspace_tmp_path):
     assert projection.to_payload()["market_trades"]["trade-1"]["side"] == OrderSide.BUY.value
 
 
+def test_projection_can_replay_with_market_trade_retention_limit(workspace_tmp_path):
+    ledger = AuditLedger(workspace_tmp_path / "audit.jsonl")
+    router = RedundantFeedRouter(AuditCore(ledger))
+
+    for sequence, product_id, trade_id in (
+        (1, "BIT-29MAY26-CDE", "trade-1"),
+        (2, "BIT-29MAY26-CDE", "trade-2"),
+        (3, "ALT-29MAY26-CDE", "trade-alt-1"),
+        (4, "BIT-29MAY26-CDE", "trade-3"),
+    ):
+        router.ingest(
+            FeedMessage(
+                source_id="coinbase-primary",
+                message_key=f"coinbase:market_trades:{sequence}",
+                event_type=EventType.DATA_RECEIVED,
+                payload={
+                    "channel": "market_trades",
+                    "raw": {
+                        "channel": "market_trades",
+                        "events": [
+                            {
+                                "trades": [
+                                    {
+                                        "price": str(100 + sequence),
+                                        "product_id": product_id,
+                                        "side": "BUY",
+                                        "size": "1",
+                                        "time": f"2026-01-01T00:00:0{sequence}Z",
+                                        "trade_id": trade_id,
+                                    }
+                                ],
+                                "type": "update",
+                            }
+                        ],
+                        "sequence_num": sequence,
+                        "timestamp": f"2026-01-01T00:00:0{sequence}Z",
+                    },
+                    "sequence_num": sequence,
+                    "timestamp": f"2026-01-01T00:00:0{sequence}Z",
+                },
+            )
+        )
+
+    uncapped = SourceOfTruthProjection.from_ledger(ledger)
+    capped = SourceOfTruthProjection.from_ledger(
+        ledger,
+        max_market_trades_per_product=2,
+    )
+    bit_trades = capped.market_trades_for_product("BIT-29MAY26-CDE")
+    alt_trades = capped.market_trades_for_product("ALT-29MAY26-CDE")
+    payload = capped.to_payload()["market_trade_retention"]
+
+    assert uncapped.market_trade_count == 4
+    assert [trade.trade_id for trade in uncapped.market_trades_for_product("BIT-29MAY26-CDE")] == [
+        "trade-1",
+        "trade-2",
+        "trade-3",
+    ]
+    assert capped.market_trade_count == 3
+    assert [trade.trade_id for trade in bit_trades] == ["trade-2", "trade-3"]
+    assert [trade.trade_id for trade in alt_trades] == ["trade-alt-1"]
+    assert "trade-1" not in capped.market_trades_by_id
+    assert capped.market_trade_retention_dropped_count == 1
+    assert capped.market_trade_retention_dropped_by_product_id == {"BIT-29MAY26-CDE": 1}
+    assert payload["max_market_trades_per_product"] == 2
+    assert payload["dropped_count"] == 1
+    assert payload["dropped_by_product_id"] == {"BIT-29MAY26-CDE": 1}
+
+    with pytest.raises(ValueError, match="max_market_trades_per_product must be positive"):
+        SourceOfTruthProjection(max_market_trades_per_product=0)
+    with pytest.raises(TypeError, match="max_market_trades_per_product must be an integer"):
+        SourceOfTruthProjection(max_market_trades_per_product=True)
+
+
 def test_projection_replaces_order_book_levels_on_new_snapshot(workspace_tmp_path):
     ledger = AuditLedger(workspace_tmp_path / "audit.jsonl")
     router = RedundantFeedRouter(AuditCore(ledger))
@@ -310,7 +386,17 @@ def test_projection_replaces_order_book_levels_on_new_snapshot(workspace_tmp_pat
                                 "type": "snapshot",
                                 "updates": [
                                     {"new_quantity": "2", "price_level": bid, "side": "bid"},
+                                    {
+                                        "new_quantity": "1",
+                                        "price_level": str(int(bid) - 1),
+                                        "side": "bid",
+                                    },
                                     {"new_quantity": "3", "price_level": ask, "side": "offer"},
+                                    {
+                                        "new_quantity": "1",
+                                        "price_level": str(int(ask) + 1),
+                                        "side": "offer",
+                                    },
                                 ],
                             }
                         ],
@@ -323,13 +409,62 @@ def test_projection_replaces_order_book_levels_on_new_snapshot(workspace_tmp_pat
             )
         )
 
-    book = SourceOfTruthProjection.from_ledger(ledger).order_book("BIT-29MAY26-CDE")
+    default_projection = SourceOfTruthProjection.from_ledger(ledger)
+    retained_projection = SourceOfTruthProjection.from_ledger(
+        ledger,
+        max_order_book_samples_per_product=2,
+    )
+    depth_limited_projection = SourceOfTruthProjection.from_ledger(
+        ledger,
+        max_order_book_sample_depth_per_side=1,
+        max_order_book_samples_per_product=2,
+    )
+    book = default_projection.order_book("BIT-29MAY26-CDE")
+    default_samples = default_projection.order_book_samples_for_product("BIT-29MAY26-CDE")
+    retained_samples = retained_projection.order_book_samples_for_product("BIT-29MAY26-CDE")
+    depth_limited_samples = depth_limited_projection.order_book_samples_for_product(
+        "BIT-29MAY26-CDE"
+    )
 
     assert book is not None
-    assert book.bid_levels == {"105": "2"}
-    assert book.ask_levels == {"106": "3"}
+    assert book.bid_levels == {"105": "2", "104": "1"}
+    assert book.ask_levels == {"106": "3", "107": "1"}
     assert book.best_bid_price == "105"
     assert book.best_ask_price == "106"
+    assert [sample.best_bid_price for sample in default_samples] == ["105"]
+    assert default_projection.order_book_sample_retention_dropped_count == 1
+    assert default_projection.order_book_sample_retention_dropped_by_product_id == {
+        "BIT-29MAY26-CDE": 1
+    }
+    assert [sample.best_bid_price for sample in retained_samples] == ["100", "105"]
+    assert retained_projection.order_book_sample_retention_dropped_count == 0
+    assert depth_limited_projection.order_book("BIT-29MAY26-CDE").bid_levels == {
+        "105": "2",
+        "104": "1",
+    }
+    assert [sample.bid_levels for sample in depth_limited_samples] == [
+        {"100": "2"},
+        {"105": "2"},
+    ]
+    assert [sample.ask_levels for sample in depth_limited_samples] == [
+        {"101": "3"},
+        {"106": "3"},
+    ]
+    assert retained_projection.to_payload()["market_order_book_sample_retention"] == {
+        "dropped_by_product_id": {},
+        "dropped_count": 0,
+        "max_order_book_sample_depth_per_side": None,
+        "max_order_book_samples_per_product": 2,
+    }
+
+    with pytest.raises(ValueError, match="max_order_book_samples_per_product must be positive"):
+        SourceOfTruthProjection(max_order_book_samples_per_product=0)
+    with pytest.raises(TypeError, match="max_order_book_samples_per_product must be an integer"):
+        SourceOfTruthProjection(max_order_book_samples_per_product=True)
+    with pytest.raises(ValueError, match="max_order_book_sample_depth_per_side must be positive"):
+        SourceOfTruthProjection(max_order_book_sample_depth_per_side=0)
+    with pytest.raises(TypeError, match="max_order_book_sample_depth_per_side must be an integer"):
+        SourceOfTruthProjection(max_order_book_sample_depth_per_side=True)
 
 
 def test_projection_tracks_errors_triggers_and_sequence_anomalies(workspace_tmp_path):

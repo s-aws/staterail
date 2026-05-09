@@ -511,6 +511,42 @@ class OperatorActionSkipReason(StringEnum):
     MISSING_ORDER_IDENTIFIER = "missing_order_identifier"
 
 
+class OperatorCanaryConfigRole(StringEnum):
+    DRY_RUN = "dry_run"
+    LIVE = "live"
+
+
+class OperatorCanaryPlanIssue(StringEnum):
+    DRY_RUN_CONFIG_NOT_DRY_RUN = "dry_run_config_not_dry_run"
+    KILL_SWITCH_ENABLED = "kill_switch_enabled"
+    LIVE_CONFIG_NOT_LIVE = "live_config_not_live"
+    NON_POSITIVE_LIMIT_PRICE = "non_positive_limit_price"
+    NON_POSITIVE_SIZE = "non_positive_size"
+    ORDER_TYPE_OUTSIDE_RISK_SCOPE = "order_type_outside_risk_scope"
+    PRODUCT_OUTSIDE_RISK_SCOPE = "product_outside_risk_scope"
+    REDUCE_ONLY_REQUIRED = "reduce_only_required"
+    SIDE_OUTSIDE_RISK_SCOPE = "side_outside_risk_scope"
+    TIME_IN_FORCE_OUTSIDE_RISK_SCOPE = "time_in_force_outside_risk_scope"
+    UNSUPPORTED_ORDER_TYPE = "unsupported_order_type"
+    UNSUPPORTED_POST_ONLY = "unsupported_post_only"
+
+
+class OperatorCanaryPlanStep(StringEnum):
+    DRY_RUN_CANCEL_ALL_OPEN_ORDERS = "dry_run_cancel_all_open_orders"
+    DRY_RUN_LEDGER_HEALTH = "dry_run_ledger_health"
+    DRY_RUN_OPEN_ORDERS = "dry_run_open_orders"
+    DRY_RUN_PLACE_ORDER = "dry_run_place_order"
+    LEDGER_HEALTH = "ledger_health"
+    LIVE_CANCEL_ORDER = "live_cancel_order"
+    LIVE_NO_ORDER_PREFLIGHT = "live_no_order_preflight"
+    LIVE_OPEN_ORDERS = "live_open_orders"
+    LIVE_PLACE_ORDER = "live_place_order"
+    LIVE_RUNTIME_GATE = "live_runtime_gate"
+    READINESS = "readiness"
+    SOURCE_OF_TRUTH = "source_of_truth"
+    STRATEGY_SIMULATION = "strategy_simulation"
+
+
 class ExchangeOrderStatus(StringEnum):
     CANCELLED = "CANCELLED"
     CANCEL_QUEUED = "CANCEL_QUEUED"
@@ -626,6 +662,16 @@ class MarketDataKind(StringEnum):
     ORDER_BOOK = "order_book"
     TICKER = "ticker"
     TRADE = "trade"
+
+
+class MarketSeriesMembershipRule(StringEnum):
+    FIXED_BUCKETS_FINAL_END_INCLUSIVE = "fixed_buckets_final_end_inclusive"
+    START_INCLUSIVE_END_EXCLUSIVE = "start_inclusive_end_exclusive"
+    START_INCLUSIVE_END_INCLUSIVE = "start_inclusive_end_inclusive"
+
+
+class MarketSeriesTimeField(StringEnum):
+    OBSERVED_AT = "observed_at"
 
 
 class StrategyInputStatus(StringEnum):

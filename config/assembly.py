@@ -446,6 +446,9 @@ class StrategyRuntimeConfig:
     strategy_ids: tuple[str, ...] = ()
     strategy_parameters: Mapping[str, Mapping[str, Any]] = field(default_factory=dict)
     market_data_requirements: tuple[StrategyInputRequirement, ...] = ()
+    max_market_trades_per_product: int | None = None
+    max_order_book_sample_depth_per_side: int | None = None
+    max_order_book_samples_per_product: int = 1
     allow_live_execution: bool = False
     operator_policy: OperatorPolicy | None = None
 
@@ -474,6 +477,36 @@ class StrategyRuntimeConfig:
                 raise TypeError(
                     "market_data_requirements must contain StrategyInputRequirement values"
                 )
+        if self.max_market_trades_per_product is not None:
+            if (
+                isinstance(self.max_market_trades_per_product, bool)
+                or not isinstance(self.max_market_trades_per_product, int)
+            ):
+                raise TypeError("max_market_trades_per_product must be an integer when provided")
+            if self.max_market_trades_per_product <= 0:
+                raise ValueError("max_market_trades_per_product must be positive")
+        if (
+            self.max_order_book_sample_depth_per_side is not None
+            and (
+                isinstance(self.max_order_book_sample_depth_per_side, bool)
+                or not isinstance(self.max_order_book_sample_depth_per_side, int)
+            )
+        ):
+            raise TypeError(
+                "max_order_book_sample_depth_per_side must be an integer when provided"
+            )
+        if (
+            self.max_order_book_sample_depth_per_side is not None
+            and self.max_order_book_sample_depth_per_side <= 0
+        ):
+            raise ValueError("max_order_book_sample_depth_per_side must be positive")
+        if (
+            isinstance(self.max_order_book_samples_per_product, bool)
+            or not isinstance(self.max_order_book_samples_per_product, int)
+        ):
+            raise TypeError("max_order_book_samples_per_product must be an integer")
+        if self.max_order_book_samples_per_product <= 0:
+            raise ValueError("max_order_book_samples_per_product must be positive")
         if not isinstance(self.allow_live_execution, bool):
             raise TypeError("allow_live_execution must be a bool")
         if self.operator_policy is not None and not isinstance(self.operator_policy, OperatorPolicy):
@@ -905,6 +938,11 @@ def assemble_coinbase_runtime(
             execution_mode=config.rest.execution_mode,
             executor=rest_executor,
             market_data_requirements=effective_strategy_market_data_requirements(config),
+            max_market_trades_per_product=config.strategies.max_market_trades_per_product,
+            max_order_book_sample_depth_per_side=(
+                config.strategies.max_order_book_sample_depth_per_side
+            ),
+            max_order_book_samples_per_product=config.strategies.max_order_book_samples_per_product,
             operator_policy=config.strategies.operator_policy,
             product_catalog=resolved_product_catalog,
             strategies=selected_strategies,

@@ -39,7 +39,9 @@ from core.enums import (
     StrategyHelperStatus,
     StrategyEvaluationStatus,
     StrategyInputStatus,
+    StrategyMarketDataStatus,
 )
+from feeds.router import FeedMessage, RedundantFeedRouter
 from app.ledger_health import ledger_health
 from orders.sizing import OrderSizingDecision
 from products.catalog import ProductCatalog, ProductMetadata
@@ -170,6 +172,41 @@ class InvalidReturnStrategy:
     def evaluate(self, snapshot: StrategySnapshot):
         del snapshot
         return {"intents": []}
+
+
+class TradeWindowMetadataStrategy:
+    @property
+    def strategy_id(self) -> str:
+        return "trade-window-metadata"
+
+    def evaluate(self, snapshot: StrategySnapshot) -> StrategyDecision:
+        window = snapshot.trade_window("AVA-29MAY26-CDE", lookback=timedelta(minutes=5))
+        return StrategyDecision(
+            metadata={
+                "projection_retention": snapshot.projection.to_payload()["market_trade_retention"],
+                "trade_window": window.to_payload(),
+            }
+        )
+
+
+class OrderBookWindowMetadataStrategy:
+    @property
+    def strategy_id(self) -> str:
+        return "order-book-window-metadata"
+
+    def evaluate(self, snapshot: StrategySnapshot) -> StrategyDecision:
+        window = snapshot.order_book_sample_window(
+            "AVA-29MAY26-CDE",
+            lookback=timedelta(minutes=5),
+        )
+        return StrategyDecision(
+            metadata={
+                "order_book_window": window.to_payload(),
+                "projection_retention": snapshot.projection.to_payload()[
+                    "market_order_book_sample_retention"
+                ],
+            }
+        )
 
 
 def test_strategy_task_audits_evaluation_and_submits_intents_through_gateway(workspace_tmp_path):
@@ -990,6 +1027,167 @@ def test_strategy_task_blocks_stale_or_missing_required_market_data(workspace_tm
     assert records[1].payload["error_code"] == ErrorCode.STRATEGY_INPUT_UNAVAILABLE.value
     assert records[2].event_type == EventType.STRATEGY_EVALUATION_FAILED
     assert records[2].payload["input_freshness"][0]["status"] == StrategyInputStatus.MISSING.value
+
+
+def test_strategy_task_applies_market_trade_retention_cap_to_snapshots(workspace_tmp_path):
+    clock = FixedClock(datetime(2026, 1, 1, 12, 0, 5, tzinfo=timezone.utc))
+    ledger = AuditLedger(workspace_tmp_path / "audit.jsonl", clock=clock)
+    core = AuditCore(ledger)
+    router = RedundantFeedRouter(core, clock=clock)
+    for sequence in range(1, 4):
+        router.ingest(
+            FeedMessage(
+                source_id="coinbase-primary",
+                message_key=f"coinbase:market_trades:{sequence}",
+                event_type=EventType.DATA_RECEIVED,
+                payload={
+                    "channel": "market_trades",
+                    "raw": {
+                        "channel": "market_trades",
+                        "events": [
+                            {
+                                "trades": [
+                                    {
+                                        "price": str(100 + sequence),
+                                        "product_id": "AVA-29MAY26-CDE",
+                                        "side": OrderSide.BUY.value,
+                                        "size": "1",
+                                        "time": f"2026-01-01T12:00:0{sequence}Z",
+                                        "trade_id": f"trade-{sequence}",
+                                    }
+                                ],
+                                "type": "update",
+                            }
+                        ],
+                        "sequence_num": sequence,
+                        "timestamp": f"2026-01-01T12:00:0{sequence}Z",
+                    },
+                    "sequence_num": sequence,
+                    "timestamp": f"2026-01-01T12:00:0{sequence}Z",
+                },
+            )
+        )
+    task = StrategyEvaluationTask(
+        core,
+        action_gateway=ActionGateway(core),
+        clock=clock,
+        execution_mode=ExecutionMode.DRY_RUN,
+        executor=DryRunExecutor(),
+        max_market_trades_per_product=2,
+        strategies=(TradeWindowMetadataStrategy(),),
+    )
+
+    result = task.run()
+    records = ledger.iter_records()
+    started = next(
+        record
+        for record in records
+        if record.event_type == EventType.STRATEGY_EVALUATION_STARTED
+    )
+    completed = next(
+        record
+        for record in records
+        if record.event_type == EventType.STRATEGY_EVALUATION_COMPLETED
+    )
+    metadata = completed.payload["metadata"]
+
+    assert result["completed_count"] == 1
+    assert result["submitted_action_count"] == 0
+    assert started.payload["max_market_trades_per_product"] == 2
+    assert metadata["trade_window"]["status"] == StrategyMarketDataStatus.OK.value
+    assert metadata["trade_window"]["trade_ids"] == ["trade-2", "trade-3"]
+    assert metadata["projection_retention"] == {
+        "dropped_by_product_id": {"AVA-29MAY26-CDE": 1},
+        "dropped_count": 1,
+        "max_market_trades_per_product": 2,
+    }
+
+
+def test_strategy_task_applies_order_book_sample_retention_cap_to_snapshots(workspace_tmp_path):
+    clock = FixedClock(datetime(2026, 1, 1, 12, 0, 5, tzinfo=timezone.utc))
+    ledger = AuditLedger(workspace_tmp_path / "audit.jsonl", clock=clock)
+    core = AuditCore(ledger)
+    router = RedundantFeedRouter(core, clock=clock)
+    for sequence, bid, ask in (
+        (1, "99", "101"),
+        (2, "100", "102"),
+        (3, "101", "103"),
+    ):
+        router.ingest(
+            FeedMessage(
+                source_id="coinbase-primary",
+                message_key=f"coinbase:l2_data:{sequence}",
+                event_type=EventType.DATA_RECEIVED,
+                payload={
+                    "channel": "l2_data",
+                    "raw": {
+                        "channel": "l2_data",
+                        "events": [
+                            {
+                                "product_id": "AVA-29MAY26-CDE",
+                                "type": "snapshot",
+                                "updates": [
+                                    {"new_quantity": "2", "price_level": bid, "side": "bid"},
+                                    {
+                                        "new_quantity": "1",
+                                        "price_level": str(int(bid) - 1),
+                                        "side": "bid",
+                                    },
+                                    {"new_quantity": "3", "price_level": ask, "side": "offer"},
+                                    {
+                                        "new_quantity": "1",
+                                        "price_level": str(int(ask) + 1),
+                                        "side": "offer",
+                                    },
+                                ],
+                            }
+                        ],
+                        "sequence_num": sequence,
+                        "timestamp": f"2026-01-01T12:00:0{sequence}Z",
+                    },
+                    "sequence_num": sequence,
+                    "timestamp": f"2026-01-01T12:00:0{sequence}Z",
+                },
+            )
+        )
+    task = StrategyEvaluationTask(
+        core,
+        action_gateway=ActionGateway(core),
+        clock=clock,
+        execution_mode=ExecutionMode.DRY_RUN,
+        executor=DryRunExecutor(),
+        max_order_book_sample_depth_per_side=1,
+        max_order_book_samples_per_product=2,
+        strategies=(OrderBookWindowMetadataStrategy(),),
+    )
+
+    result = task.run()
+    records = ledger.iter_records()
+    started = next(
+        record
+        for record in records
+        if record.event_type == EventType.STRATEGY_EVALUATION_STARTED
+    )
+    completed = next(
+        record
+        for record in records
+        if record.event_type == EventType.STRATEGY_EVALUATION_COMPLETED
+    )
+    metadata = completed.payload["metadata"]
+
+    assert result["completed_count"] == 1
+    assert result["submitted_action_count"] == 0
+    assert started.payload["max_order_book_sample_depth_per_side"] == 1
+    assert started.payload["max_order_book_samples_per_product"] == 2
+    assert metadata["order_book_window"]["status"] == StrategyMarketDataStatus.OK.value
+    assert metadata["order_book_window"]["sample_count"] == 2
+    assert metadata["order_book_window"]["sample_sequences"] == [4, 6]
+    assert metadata["projection_retention"] == {
+        "dropped_by_product_id": {"AVA-29MAY26-CDE": 1},
+        "dropped_count": 1,
+        "max_order_book_sample_depth_per_side": 1,
+        "max_order_book_samples_per_product": 2,
+    }
 
 
 def test_strategy_task_rejects_duplicate_decision_actions_before_gateway(workspace_tmp_path):

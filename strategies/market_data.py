@@ -6,7 +6,12 @@ from datetime import datetime, timedelta
 from decimal import Decimal, InvalidOperation
 from typing import Any
 
-from core.enums import OrderSide, StrategyMarketDataStatus
+from core.enums import (
+    MarketSeriesMembershipRule,
+    MarketSeriesTimeField,
+    OrderSide,
+    StrategyMarketDataStatus,
+)
 from core.json_tools import JsonValue, normalize_json
 from products.catalog import ProductCatalog, ProductMetadata
 from projections.state import (
@@ -17,6 +22,52 @@ from projections.state import (
 
 
 AmountInput = Decimal | str | int | float
+
+
+@dataclass(frozen=True)
+class MarketSeriesWindow:
+    product_id: str
+    as_of: datetime
+    lookback: timedelta
+    window_start: datetime
+    window_end: datetime
+    membership_rule: MarketSeriesMembershipRule = (
+        MarketSeriesMembershipRule.START_INCLUSIVE_END_INCLUSIVE
+    )
+    retention_limit: int | None = None
+    time_field: MarketSeriesTimeField = MarketSeriesTimeField.OBSERVED_AT
+
+    def __post_init__(self) -> None:
+        _validate_product_id(self.product_id)
+        _validate_datetime(self.as_of, "as_of")
+        _validate_lookback(self.lookback)
+        _validate_datetime(self.window_start, "window_start")
+        _validate_datetime(self.window_end, "window_end")
+        if self.window_start >= self.window_end:
+            raise ValueError("window_start must be before window_end")
+        if self.window_end != self.as_of:
+            raise ValueError("window_end must equal as_of")
+        if self.window_end - self.window_start != self.lookback:
+            raise ValueError("window bounds must match lookback")
+        if not isinstance(self.membership_rule, MarketSeriesMembershipRule):
+            raise TypeError("membership_rule must be a MarketSeriesMembershipRule")
+        if not isinstance(self.time_field, MarketSeriesTimeField):
+            raise TypeError("time_field must be a MarketSeriesTimeField")
+        _validate_max_retained_trades(self.retention_limit)
+
+    def to_payload(self) -> dict[str, JsonValue]:
+        return _payload(
+            {
+                "as_of": self.as_of,
+                "lookback_seconds": self.lookback.total_seconds(),
+                "membership_rule": self.membership_rule,
+                "product_id": self.product_id,
+                "retention_limit": self.retention_limit,
+                "time_field": self.time_field,
+                "window_end": self.window_end,
+                "window_start": self.window_start,
+            }
+        )
 
 
 @dataclass(frozen=True)
@@ -174,6 +225,148 @@ class MarketOrderBookStats:
 
 
 @dataclass(frozen=True)
+class OrderBookSampleWindow:
+    product_id: str
+    lookback: timedelta
+    status: StrategyMarketDataStatus
+    samples: tuple[MarketOrderBookSnapshot, ...] = ()
+    available_sample_count: int = 0
+    min_samples: int = 2
+    retention_dropped_sample_count: int = 0
+    retention_limit: int | None = None
+    sample_count: int = 0
+    timestamped_sample_count: int = 0
+    window_end: datetime | None = None
+    window_start: datetime | None = None
+    first_sequence: int | None = None
+    last_sequence: int | None = None
+    first_observed_at: datetime | None = None
+    last_observed_at: datetime | None = None
+    source_sequences: tuple[int, ...] = ()
+    membership_rule: MarketSeriesMembershipRule = (
+        MarketSeriesMembershipRule.START_INCLUSIVE_END_INCLUSIVE
+    )
+    time_field: MarketSeriesTimeField = MarketSeriesTimeField.OBSERVED_AT
+
+    @property
+    def is_ok(self) -> bool:
+        return self.status == StrategyMarketDataStatus.OK
+
+    def to_payload(self) -> dict[str, JsonValue]:
+        return _payload(
+            {
+                "available_sample_count": self.available_sample_count,
+                "first_observed_at": self.first_observed_at,
+                "first_sequence": self.first_sequence,
+                "is_ok": self.is_ok,
+                "last_observed_at": self.last_observed_at,
+                "last_sequence": self.last_sequence,
+                "lookback_seconds": self.lookback.total_seconds(),
+                "membership_rule": self.membership_rule,
+                "min_samples": self.min_samples,
+                "product_id": self.product_id,
+                "retention_dropped_sample_count": self.retention_dropped_sample_count,
+                "retention_limit": self.retention_limit,
+                "sample_count": self.sample_count,
+                "sample_sequences": tuple(sample.sequence for sample in self.samples),
+                "source_sequences": self.source_sequences,
+                "status": self.status,
+                "timestamped_sample_count": self.timestamped_sample_count,
+                "time_field": self.time_field,
+                "window_end": self.window_end,
+                "window_start": self.window_start,
+            }
+        )
+
+
+@dataclass(frozen=True)
+class OrderBookWindowStats:
+    product_id: str
+    lookback: timedelta
+    status: StrategyMarketDataStatus
+    levels: int | None = None
+    max_distance_bps: Decimal | None = None
+    available_sample_count: int = 0
+    min_samples: int = 2
+    retention_dropped_sample_count: int = 0
+    retention_limit: int | None = None
+    sample_count: int = 0
+    timestamped_sample_count: int = 0
+    valid_stats_count: int = 0
+    window_end: datetime | None = None
+    window_start: datetime | None = None
+    first_sequence: int | None = None
+    last_sequence: int | None = None
+    first_observed_at: datetime | None = None
+    last_observed_at: datetime | None = None
+    source_sequences: tuple[int, ...] = ()
+    membership_rule: MarketSeriesMembershipRule = (
+        MarketSeriesMembershipRule.START_INCLUSIVE_END_INCLUSIVE
+    )
+    time_field: MarketSeriesTimeField = MarketSeriesTimeField.OBSERVED_AT
+    average_bid_volume: Decimal | None = None
+    average_ask_volume: Decimal | None = None
+    average_book_imbalance: Decimal | None = None
+    min_book_imbalance: Decimal | None = None
+    max_book_imbalance: Decimal | None = None
+    average_midpoint: Decimal | None = None
+    first_midpoint: Decimal | None = None
+    last_midpoint: Decimal | None = None
+    average_spread: Decimal | None = None
+    min_spread: Decimal | None = None
+    max_spread: Decimal | None = None
+    average_spread_bps: Decimal | None = None
+    min_spread_bps: Decimal | None = None
+    max_spread_bps: Decimal | None = None
+
+    @property
+    def is_ok(self) -> bool:
+        return self.status == StrategyMarketDataStatus.OK
+
+    def to_payload(self) -> dict[str, JsonValue]:
+        return _payload(
+            {
+                "available_sample_count": self.available_sample_count,
+                "average_ask_volume": self.average_ask_volume,
+                "average_bid_volume": self.average_bid_volume,
+                "average_book_imbalance": self.average_book_imbalance,
+                "average_midpoint": self.average_midpoint,
+                "average_spread": self.average_spread,
+                "average_spread_bps": self.average_spread_bps,
+                "first_midpoint": self.first_midpoint,
+                "first_observed_at": self.first_observed_at,
+                "first_sequence": self.first_sequence,
+                "is_ok": self.is_ok,
+                "last_midpoint": self.last_midpoint,
+                "last_observed_at": self.last_observed_at,
+                "last_sequence": self.last_sequence,
+                "levels": self.levels,
+                "lookback_seconds": self.lookback.total_seconds(),
+                "max_book_imbalance": self.max_book_imbalance,
+                "max_distance_bps": self.max_distance_bps,
+                "max_spread": self.max_spread,
+                "max_spread_bps": self.max_spread_bps,
+                "membership_rule": self.membership_rule,
+                "min_book_imbalance": self.min_book_imbalance,
+                "min_samples": self.min_samples,
+                "min_spread": self.min_spread,
+                "min_spread_bps": self.min_spread_bps,
+                "product_id": self.product_id,
+                "retention_dropped_sample_count": self.retention_dropped_sample_count,
+                "retention_limit": self.retention_limit,
+                "sample_count": self.sample_count,
+                "source_sequences": self.source_sequences,
+                "status": self.status,
+                "timestamped_sample_count": self.timestamped_sample_count,
+                "time_field": self.time_field,
+                "valid_stats_count": self.valid_stats_count,
+                "window_end": self.window_end,
+                "window_start": self.window_start,
+            }
+        )
+
+
+@dataclass(frozen=True)
 class LatestMarketTrade:
     product_id: str
     status: StrategyMarketDataStatus
@@ -213,6 +406,8 @@ class TradeWindow:
     status: StrategyMarketDataStatus
     trades: tuple[MarketTradeSnapshot, ...] = ()
     available_trade_count: int = 0
+    retention_dropped_trade_count: int = 0
+    retention_limit: int | None = None
     timestamped_trade_count: int = 0
     trade_count: int = 0
     window_end: datetime | None = None
@@ -222,6 +417,10 @@ class TradeWindow:
     first_observed_at: datetime | None = None
     last_observed_at: datetime | None = None
     source_sequences: tuple[int, ...] = ()
+    membership_rule: MarketSeriesMembershipRule = (
+        MarketSeriesMembershipRule.START_INCLUSIVE_END_INCLUSIVE
+    )
+    time_field: MarketSeriesTimeField = MarketSeriesTimeField.OBSERVED_AT
 
     @property
     def is_ok(self) -> bool:
@@ -237,10 +436,14 @@ class TradeWindow:
                 "last_observed_at": self.last_observed_at,
                 "last_sequence": self.last_sequence,
                 "lookback_seconds": self.lookback.total_seconds(),
+                "membership_rule": self.membership_rule,
                 "product_id": self.product_id,
+                "retention_dropped_trade_count": self.retention_dropped_trade_count,
+                "retention_limit": self.retention_limit,
                 "source_sequences": self.source_sequences,
                 "status": self.status,
                 "timestamped_trade_count": self.timestamped_trade_count,
+                "time_field": self.time_field,
                 "trade_count": self.trade_count,
                 "trade_ids": tuple(trade.trade_id for trade in self.trades),
                 "window_end": self.window_end,
@@ -284,6 +487,12 @@ class MarketWindowStats:
     first_observed_at: datetime | None = None
     last_observed_at: datetime | None = None
     source_sequences: tuple[int, ...] = ()
+    retention_dropped_trade_count: int = 0
+    retention_limit: int | None = None
+    membership_rule: MarketSeriesMembershipRule = (
+        MarketSeriesMembershipRule.START_INCLUSIVE_END_INCLUSIVE
+    )
+    time_field: MarketSeriesTimeField = MarketSeriesTimeField.OBSERVED_AT
 
     @property
     def is_ok(self) -> bool:
@@ -313,16 +522,20 @@ class MarketWindowStats:
                 "last_sequence": self.last_sequence,
                 "lookback_seconds": self.lookback.total_seconds(),
                 "low": self.low,
+                "membership_rule": self.membership_rule,
                 "net_aggressor_quote_volume": self.net_aggressor_quote_volume,
                 "net_aggressor_volume": self.net_aggressor_volume,
                 "open": self.open,
                 "product_id": self.product_id,
                 "quote_volume": self.quote_volume,
                 "realized_volatility": self.realized_volatility,
+                "retention_dropped_trade_count": self.retention_dropped_trade_count,
+                "retention_limit": self.retention_limit,
                 "sell_aggressor_quote_volume": self.sell_aggressor_quote_volume,
                 "sell_aggressor_volume": self.sell_aggressor_volume,
                 "source_sequences": self.source_sequences,
                 "status": self.status,
+                "time_field": self.time_field,
                 "trade_count": self.trade_count,
                 "twap": self.twap,
                 "unclassified_trade_count": self.unclassified_trade_count,
@@ -366,6 +579,10 @@ class MarketCandle:
     first_observed_at: datetime | None = None
     last_observed_at: datetime | None = None
     source_sequences: tuple[int, ...] = ()
+    membership_rule: MarketSeriesMembershipRule = (
+        MarketSeriesMembershipRule.START_INCLUSIVE_END_EXCLUSIVE
+    )
+    time_field: MarketSeriesTimeField = MarketSeriesTimeField.OBSERVED_AT
 
     @property
     def is_ok(self) -> bool:
@@ -395,6 +612,7 @@ class MarketCandle:
                 "last_observed_at": self.last_observed_at,
                 "last_sequence": self.last_sequence,
                 "low": self.low,
+                "membership_rule": self.membership_rule,
                 "net_aggressor_quote_volume": self.net_aggressor_quote_volume,
                 "net_aggressor_volume": self.net_aggressor_volume,
                 "open": self.open,
@@ -405,6 +623,7 @@ class MarketCandle:
                 "source_sequences": self.source_sequences,
                 "start": self.start,
                 "status": self.status,
+                "time_field": self.time_field,
                 "trade_count": self.trade_count,
                 "unclassified_trade_count": self.unclassified_trade_count,
                 "valid_price_count": self.valid_price_count,
@@ -432,6 +651,12 @@ class MarketCandles:
     first_observed_at: datetime | None = None
     last_observed_at: datetime | None = None
     source_sequences: tuple[int, ...] = ()
+    retention_dropped_trade_count: int = 0
+    retention_limit: int | None = None
+    membership_rule: MarketSeriesMembershipRule = (
+        MarketSeriesMembershipRule.FIXED_BUCKETS_FINAL_END_INCLUSIVE
+    )
+    time_field: MarketSeriesTimeField = MarketSeriesTimeField.OBSERVED_AT
 
     @property
     def is_ok(self) -> bool:
@@ -457,9 +682,13 @@ class MarketCandles:
                 "last_observed_at": self.last_observed_at,
                 "last_sequence": self.last_sequence,
                 "lookback_seconds": self.lookback.total_seconds(),
+                "membership_rule": self.membership_rule,
                 "product_id": self.product_id,
+                "retention_dropped_trade_count": self.retention_dropped_trade_count,
+                "retention_limit": self.retention_limit,
                 "source_sequences": self.source_sequences,
                 "status": self.status,
+                "time_field": self.time_field,
                 "trade_count": self.trade_count,
                 "window_end": self.window_end,
                 "window_start": self.window_start,
@@ -483,6 +712,12 @@ class RollingTradeVolume:
     last_sequence: int | None = None
     first_observed_at: datetime | None = None
     last_observed_at: datetime | None = None
+    retention_dropped_trade_count: int = 0
+    retention_limit: int | None = None
+    membership_rule: MarketSeriesMembershipRule = (
+        MarketSeriesMembershipRule.START_INCLUSIVE_END_INCLUSIVE
+    )
+    time_field: MarketSeriesTimeField = MarketSeriesTimeField.OBSERVED_AT
 
     @property
     def is_ok(self) -> bool:
@@ -499,9 +734,13 @@ class RollingTradeVolume:
                 "last_observed_at": self.last_observed_at,
                 "last_sequence": self.last_sequence,
                 "lookback_seconds": self.lookback.total_seconds(),
+                "membership_rule": self.membership_rule,
                 "product_id": self.product_id,
                 "quote_volume": self.quote_volume,
+                "retention_dropped_trade_count": self.retention_dropped_trade_count,
+                "retention_limit": self.retention_limit,
                 "status": self.status,
+                "time_field": self.time_field,
                 "trade_count": self.trade_count,
                 "valid_trade_count": self.valid_trade_count,
                 "window_end": self.window_end,
@@ -522,6 +761,12 @@ class RollingTradeCount:
     last_sequence: int | None = None
     first_observed_at: datetime | None = None
     last_observed_at: datetime | None = None
+    retention_dropped_trade_count: int = 0
+    retention_limit: int | None = None
+    membership_rule: MarketSeriesMembershipRule = (
+        MarketSeriesMembershipRule.START_INCLUSIVE_END_INCLUSIVE
+    )
+    time_field: MarketSeriesTimeField = MarketSeriesTimeField.OBSERVED_AT
 
     @property
     def is_ok(self) -> bool:
@@ -536,8 +781,12 @@ class RollingTradeCount:
                 "last_observed_at": self.last_observed_at,
                 "last_sequence": self.last_sequence,
                 "lookback_seconds": self.lookback.total_seconds(),
+                "membership_rule": self.membership_rule,
                 "product_id": self.product_id,
+                "retention_dropped_trade_count": self.retention_dropped_trade_count,
+                "retention_limit": self.retention_limit,
                 "status": self.status,
+                "time_field": self.time_field,
                 "trade_count": self.trade_count,
                 "window_end": self.window_end,
                 "window_start": self.window_start,
@@ -768,6 +1017,252 @@ def order_book_stats_from_book(
     )
 
 
+def order_book_sample_window(
+    projection: SourceOfTruthProjection,
+    *,
+    as_of: datetime,
+    lookback: timedelta,
+    product_id: str,
+    max_retained_samples: int | None = None,
+    min_samples: int = 2,
+) -> OrderBookSampleWindow:
+    _validate_projection(projection)
+    _validate_product_id(product_id)
+    _validate_datetime(as_of, "as_of")
+    _validate_lookback(lookback)
+    return order_book_sample_window_from_samples(
+        as_of=as_of,
+        lookback=lookback,
+        max_retained_samples=max_retained_samples,
+        min_samples=min_samples,
+        product_id=product_id,
+        samples=projection.order_book_samples_for_product(product_id),
+    )
+
+
+def order_book_sample_window_from_samples(
+    *,
+    as_of: datetime,
+    lookback: timedelta,
+    product_id: str,
+    samples: tuple[MarketOrderBookSnapshot, ...],
+    max_retained_samples: int | None = None,
+    min_samples: int = 2,
+) -> OrderBookSampleWindow:
+    _validate_datetime(as_of, "as_of")
+    _validate_lookback(lookback)
+    _validate_max_retained_samples(max_retained_samples)
+    _validate_min_samples(min_samples)
+    _validate_product_id(product_id)
+    _validate_order_book_sample_tuple(samples)
+    series_window = MarketSeriesWindow(
+        as_of=as_of,
+        lookback=lookback,
+        product_id=product_id,
+        retention_limit=max_retained_samples,
+        window_end=as_of,
+        window_start=as_of - lookback,
+    )
+    empty = {
+        "lookback": lookback,
+        "membership_rule": series_window.membership_rule,
+        "min_samples": min_samples,
+        "product_id": product_id,
+        "retention_limit": max_retained_samples,
+        "time_field": series_window.time_field,
+        "window_end": as_of,
+        "window_start": series_window.window_start,
+    }
+    if not samples:
+        return OrderBookSampleWindow(status=StrategyMarketDataStatus.MISSING, **empty)
+
+    timestamped_samples = tuple(
+        sample for sample in samples if isinstance(sample.observed_at, datetime)
+    )
+    if not timestamped_samples:
+        return OrderBookSampleWindow(
+            available_sample_count=len(samples),
+            status=StrategyMarketDataStatus.INSUFFICIENT_DATA,
+            **empty,
+        )
+
+    in_window = tuple(
+        sample
+        for sample in timestamped_samples
+        if sample.observed_at is not None
+        and series_window.window_start <= sample.observed_at <= as_of
+    )
+    if not in_window:
+        return OrderBookSampleWindow(
+            available_sample_count=len(samples),
+            status=StrategyMarketDataStatus.STALE,
+            timestamped_sample_count=len(timestamped_samples),
+            **empty,
+        )
+
+    ordered_in_window = tuple(sorted(in_window, key=_book_sample_sort_key))
+    if max_retained_samples is None or len(ordered_in_window) <= max_retained_samples:
+        ordered = ordered_in_window
+        retention_dropped_sample_count = 0
+    else:
+        ordered = ordered_in_window[-max_retained_samples:]
+        retention_dropped_sample_count = len(ordered_in_window) - len(ordered)
+    status = (
+        StrategyMarketDataStatus.OK
+        if len(ordered) >= min_samples
+        else StrategyMarketDataStatus.INSUFFICIENT_DATA
+    )
+    return OrderBookSampleWindow(
+        available_sample_count=len(samples),
+        first_observed_at=ordered[0].observed_at,
+        first_sequence=ordered[0].sequence,
+        last_observed_at=ordered[-1].observed_at,
+        last_sequence=ordered[-1].sequence,
+        lookback=lookback,
+        membership_rule=series_window.membership_rule,
+        min_samples=min_samples,
+        product_id=product_id,
+        retention_dropped_sample_count=retention_dropped_sample_count,
+        retention_limit=max_retained_samples,
+        sample_count=len(ordered),
+        samples=ordered,
+        source_sequences=tuple(sample.sequence for sample in ordered),
+        status=status,
+        timestamped_sample_count=len(timestamped_samples),
+        time_field=series_window.time_field,
+        window_end=as_of,
+        window_start=series_window.window_start,
+    )
+
+
+def order_book_window_stats(
+    projection: SourceOfTruthProjection,
+    *,
+    as_of: datetime,
+    lookback: timedelta,
+    product_id: str,
+    levels: int | None = None,
+    max_distance_bps: AmountInput | None = None,
+    max_retained_samples: int | None = None,
+    min_samples: int = 2,
+    product_catalog: ProductCatalog | None = None,
+) -> OrderBookWindowStats:
+    _validate_projection(projection)
+    _validate_product_id(product_id)
+    _validate_datetime(as_of, "as_of")
+    _validate_lookback(lookback)
+    resolved_levels, resolved_distance = _order_book_depth_filter(
+        levels=levels,
+        max_distance_bps=max_distance_bps,
+    )
+    _validate_max_retained_samples(max_retained_samples)
+    _validate_min_samples(min_samples)
+    _validate_product_catalog(product_catalog)
+    window = order_book_sample_window(
+        projection,
+        as_of=as_of,
+        lookback=lookback,
+        max_retained_samples=max_retained_samples,
+        min_samples=min_samples,
+        product_id=product_id,
+    )
+    base = _order_book_window_stats_base(
+        window,
+        levels=resolved_levels,
+        max_distance_bps=resolved_distance,
+    )
+    if window.status in {
+        StrategyMarketDataStatus.MISSING,
+        StrategyMarketDataStatus.STALE,
+    } or not window.samples:
+        return OrderBookWindowStats(status=window.status, **base)
+
+    stats = tuple(
+        order_book_stats_from_book(
+            sample,
+            levels=resolved_levels,
+            max_distance_bps=resolved_distance,
+            product_catalog=product_catalog,
+        )
+        for sample in window.samples
+    )
+    valid_stats = tuple(item for item in stats if item.is_ok)
+    if not window.is_ok or len(valid_stats) < min_samples:
+        return OrderBookWindowStats(
+            status=StrategyMarketDataStatus.INSUFFICIENT_DATA,
+            valid_stats_count=len(valid_stats),
+            **base,
+        )
+
+    return OrderBookWindowStats(
+        average_ask_volume=_decimal_average(
+            tuple(item.ask_volume for item in valid_stats)
+        ),
+        average_bid_volume=_decimal_average(
+            tuple(item.bid_volume for item in valid_stats)
+        ),
+        average_book_imbalance=_decimal_average(
+            tuple(
+                item.book_imbalance
+                for item in valid_stats
+                if item.book_imbalance is not None
+            )
+        ),
+        average_midpoint=_decimal_average(
+            tuple(item.midpoint for item in valid_stats if item.midpoint is not None)
+        ),
+        average_spread=_decimal_average(
+            tuple(item.spread for item in valid_stats if item.spread is not None)
+        ),
+        average_spread_bps=_decimal_average(
+            tuple(
+                item.spread_bps
+                for item in valid_stats
+                if item.spread_bps is not None
+            )
+        ),
+        first_midpoint=valid_stats[0].midpoint,
+        last_midpoint=valid_stats[-1].midpoint,
+        max_book_imbalance=_decimal_max(
+            tuple(
+                item.book_imbalance
+                for item in valid_stats
+                if item.book_imbalance is not None
+            )
+        ),
+        max_spread=_decimal_max(
+            tuple(item.spread for item in valid_stats if item.spread is not None)
+        ),
+        max_spread_bps=_decimal_max(
+            tuple(
+                item.spread_bps
+                for item in valid_stats
+                if item.spread_bps is not None
+            )
+        ),
+        min_book_imbalance=_decimal_min(
+            tuple(
+                item.book_imbalance
+                for item in valid_stats
+                if item.book_imbalance is not None
+            )
+        ),
+        min_spread=_decimal_min(
+            tuple(item.spread for item in valid_stats if item.spread is not None)
+        ),
+        min_spread_bps=_decimal_min(
+            tuple(
+                item.spread_bps
+                for item in valid_stats
+                if item.spread_bps is not None
+            )
+        ),
+        status=StrategyMarketDataStatus.OK,
+        valid_stats_count=len(valid_stats),
+        **base,
+    )
+
+
 def latest_trade(projection: SourceOfTruthProjection, product_id: str) -> LatestMarketTrade:
     _validate_projection(projection)
     _validate_product_id(product_id)
@@ -808,12 +1303,34 @@ def latest_trade_from_trades(
     )
 
 
+def market_series_window(
+    *,
+    as_of: datetime,
+    lookback: timedelta,
+    product_id: str,
+    max_retained_trades: int | None = None,
+) -> MarketSeriesWindow:
+    _validate_datetime(as_of, "as_of")
+    _validate_lookback(lookback)
+    _validate_product_id(product_id)
+    _validate_max_retained_trades(max_retained_trades)
+    return MarketSeriesWindow(
+        as_of=as_of,
+        lookback=lookback,
+        product_id=product_id,
+        retention_limit=max_retained_trades,
+        window_end=as_of,
+        window_start=as_of - lookback,
+    )
+
+
 def trade_window(
     projection: SourceOfTruthProjection,
     *,
     as_of: datetime,
     lookback: timedelta,
     product_id: str,
+    max_retained_trades: int | None = None,
 ) -> TradeWindow:
     _validate_projection(projection)
     _validate_product_id(product_id)
@@ -822,6 +1339,7 @@ def trade_window(
     return trade_window_from_trades(
         as_of=as_of,
         lookback=lookback,
+        max_retained_trades=max_retained_trades,
         product_id=product_id,
         trades=projection.market_trades_for_product(product_id),
     )
@@ -833,18 +1351,28 @@ def trade_window_from_trades(
     lookback: timedelta,
     product_id: str,
     trades: tuple[MarketTradeSnapshot, ...],
+    max_retained_trades: int | None = None,
 ) -> TradeWindow:
     _validate_datetime(as_of, "as_of")
     _validate_lookback(lookback)
+    _validate_max_retained_trades(max_retained_trades)
     _validate_product_id(product_id)
     _validate_trade_tuple(trades)
 
-    window_start = as_of - lookback
+    series_window = market_series_window(
+        as_of=as_of,
+        lookback=lookback,
+        max_retained_trades=max_retained_trades,
+        product_id=product_id,
+    )
     empty = {
         "lookback": lookback,
+        "membership_rule": series_window.membership_rule,
         "product_id": product_id,
+        "retention_limit": max_retained_trades,
+        "time_field": series_window.time_field,
         "window_end": as_of,
-        "window_start": window_start,
+        "window_start": series_window.window_start,
     }
     if not trades:
         return TradeWindow(status=StrategyMarketDataStatus.MISSING, **empty)
@@ -862,7 +1390,8 @@ def trade_window_from_trades(
     in_window = tuple(
         trade
         for trade in timestamped_trades
-        if trade.observed_at is not None and window_start <= trade.observed_at <= as_of
+        if trade.observed_at is not None
+        and series_window.window_start <= trade.observed_at <= as_of
     )
     if not in_window:
         return TradeWindow(
@@ -872,7 +1401,13 @@ def trade_window_from_trades(
             **empty,
         )
 
-    ordered = tuple(sorted(in_window, key=lambda trade: trade.sequence))
+    ordered_in_window = tuple(sorted(in_window, key=_trade_sort_key))
+    if max_retained_trades is None or len(ordered_in_window) <= max_retained_trades:
+        ordered = ordered_in_window
+        retention_dropped_trade_count = 0
+    else:
+        ordered = ordered_in_window[-max_retained_trades:]
+        retention_dropped_trade_count = len(ordered_in_window) - len(ordered)
     return TradeWindow(
         available_trade_count=len(trades),
         first_observed_at=ordered[0].observed_at,
@@ -880,14 +1415,18 @@ def trade_window_from_trades(
         last_observed_at=ordered[-1].observed_at,
         last_sequence=ordered[-1].sequence,
         lookback=lookback,
+        membership_rule=series_window.membership_rule,
         product_id=product_id,
+        retention_dropped_trade_count=retention_dropped_trade_count,
+        retention_limit=max_retained_trades,
         source_sequences=tuple(trade.sequence for trade in ordered),
         status=StrategyMarketDataStatus.OK,
         timestamped_trade_count=len(timestamped_trades),
+        time_field=series_window.time_field,
         trade_count=len(ordered),
         trades=ordered,
         window_end=as_of,
-        window_start=window_start,
+        window_start=series_window.window_start,
     )
 
 
@@ -897,11 +1436,13 @@ def rolling_trade_volume(
     as_of: datetime,
     lookback: timedelta,
     product_id: str,
+    max_retained_trades: int | None = None,
 ) -> RollingTradeVolume:
     window = trade_window(
         projection,
         as_of=as_of,
         lookback=lookback,
+        max_retained_trades=max_retained_trades,
         product_id=product_id,
     )
     return rolling_trade_volume_from_window(window)
@@ -913,11 +1454,13 @@ def market_window_stats(
     as_of: datetime,
     lookback: timedelta,
     product_id: str,
+    max_retained_trades: int | None = None,
 ) -> MarketWindowStats:
     window = trade_window(
         projection,
         as_of=as_of,
         lookback=lookback,
+        max_retained_trades=max_retained_trades,
         product_id=product_id,
     )
     return market_window_stats_from_window(window)
@@ -929,10 +1472,12 @@ def market_window_stats_from_trades(
     lookback: timedelta,
     product_id: str,
     trades: tuple[MarketTradeSnapshot, ...],
+    max_retained_trades: int | None = None,
 ) -> MarketWindowStats:
     window = trade_window_from_trades(
         as_of=as_of,
         lookback=lookback,
+        max_retained_trades=max_retained_trades,
         product_id=product_id,
         trades=trades,
     )
@@ -944,7 +1489,11 @@ def market_window_stats_from_window(window: TradeWindow) -> MarketWindowStats:
         raise TypeError("window must be a TradeWindow")
     empty = {
         "lookback": window.lookback,
+        "membership_rule": window.membership_rule,
         "product_id": window.product_id,
+        "retention_dropped_trade_count": window.retention_dropped_trade_count,
+        "retention_limit": window.retention_limit,
+        "time_field": window.time_field,
         "trade_count": window.trade_count,
         "window_end": window.window_end,
         "window_start": window.window_start,
@@ -1034,6 +1583,7 @@ def market_window_stats_from_window(window: TradeWindow) -> MarketWindowStats:
         last_sequence=window.last_sequence,
         lookback=window.lookback,
         low=(min(ordered_prices) if ordered_prices else None),
+        membership_rule=window.membership_rule,
         net_aggressor_quote_volume=(
             net_aggressor_quote_volume if aggressor_status == StrategyMarketDataStatus.OK else None
         ),
@@ -1044,10 +1594,13 @@ def market_window_stats_from_window(window: TradeWindow) -> MarketWindowStats:
         product_id=window.product_id,
         quote_volume=quote_volume,
         realized_volatility=_realized_volatility(ordered_prices),
+        retention_dropped_trade_count=window.retention_dropped_trade_count,
+        retention_limit=window.retention_limit,
         sell_aggressor_quote_volume=(sell_quote_volume if aggressor_status == StrategyMarketDataStatus.OK else None),
         sell_aggressor_volume=(sell_volume if aggressor_status == StrategyMarketDataStatus.OK else None),
         source_sequences=window.source_sequences,
         status=status,
+        time_field=window.time_field,
         trade_count=window.trade_count,
         twap=_twap(price_points, window_end=window.window_end),
         unclassified_trade_count=unclassified_trade_count,
@@ -1066,11 +1619,13 @@ def candles(
     interval: timedelta,
     lookback: timedelta,
     product_id: str,
+    max_retained_trades: int | None = None,
 ) -> MarketCandles:
     window = trade_window(
         projection,
         as_of=as_of,
         lookback=lookback,
+        max_retained_trades=max_retained_trades,
         product_id=product_id,
     )
     return candles_from_window(window, interval=interval)
@@ -1083,10 +1638,12 @@ def candles_from_trades(
     lookback: timedelta,
     product_id: str,
     trades: tuple[MarketTradeSnapshot, ...],
+    max_retained_trades: int | None = None,
 ) -> MarketCandles:
     window = trade_window_from_trades(
         as_of=as_of,
         lookback=lookback,
+        max_retained_trades=max_retained_trades,
         product_id=product_id,
         trades=trades,
     )
@@ -1106,6 +1663,11 @@ def candles_from_window(window: TradeWindow, *, interval: timedelta) -> MarketCa
     for index in range(candle_count):
         start = window.window_start + (interval * index)
         end = start + interval
+        membership_rule = (
+            MarketSeriesMembershipRule.START_INCLUSIVE_END_INCLUSIVE
+            if index == candle_count - 1
+            else MarketSeriesMembershipRule.START_INCLUSIVE_END_EXCLUSIVE
+        )
         bucket_trades = _bucket_trades(
             window.trades,
             start=start,
@@ -1119,15 +1681,18 @@ def candles_from_window(window: TradeWindow, *, interval: timedelta) -> MarketCa
                 start=start,
                 end=end,
                 interval=interval,
+                membership_rule=membership_rule,
             )
             bucket_candles.append(_candle_from_stats(market_window_stats_from_window(bucket_window)))
         else:
             bucket_candles.append(
                 MarketCandle(
                     end=end,
+                    membership_rule=membership_rule,
                     product_id=window.product_id,
                     start=start,
                     status=StrategyMarketDataStatus.MISSING,
+                    time_field=window.time_field,
                 )
             )
 
@@ -1157,9 +1722,13 @@ def candles_from_window(window: TradeWindow, *, interval: timedelta) -> MarketCa
         last_observed_at=window.last_observed_at,
         last_sequence=window.last_sequence,
         lookback=window.lookback,
+        membership_rule=MarketSeriesMembershipRule.FIXED_BUCKETS_FINAL_END_INCLUSIVE,
         product_id=window.product_id,
+        retention_dropped_trade_count=window.retention_dropped_trade_count,
+        retention_limit=window.retention_limit,
         source_sequences=window.source_sequences,
         status=status,
+        time_field=window.time_field,
         trade_count=window.trade_count,
         window_end=window.window_end,
         window_start=window.window_start,
@@ -1172,11 +1741,13 @@ def rolling_trade_count(
     as_of: datetime,
     lookback: timedelta,
     product_id: str,
+    max_retained_trades: int | None = None,
 ) -> RollingTradeCount:
     window = trade_window(
         projection,
         as_of=as_of,
         lookback=lookback,
+        max_retained_trades=max_retained_trades,
         product_id=product_id,
     )
     return RollingTradeCount(
@@ -1185,8 +1756,12 @@ def rolling_trade_count(
         last_observed_at=window.last_observed_at,
         last_sequence=window.last_sequence,
         lookback=window.lookback,
+        membership_rule=window.membership_rule,
         product_id=window.product_id,
+        retention_dropped_trade_count=window.retention_dropped_trade_count,
+        retention_limit=window.retention_limit,
         status=window.status,
+        time_field=window.time_field,
         trade_count=window.trade_count,
         window_end=window.window_end,
         window_start=window.window_start,
@@ -1199,10 +1774,12 @@ def rolling_trade_volume_from_trades(
     lookback: timedelta,
     product_id: str,
     trades: tuple[MarketTradeSnapshot, ...],
+    max_retained_trades: int | None = None,
 ) -> RollingTradeVolume:
     window = trade_window_from_trades(
         as_of=as_of,
         lookback=lookback,
+        max_retained_trades=max_retained_trades,
         product_id=product_id,
         trades=trades,
     )
@@ -1214,7 +1791,11 @@ def rolling_trade_volume_from_window(window: TradeWindow) -> RollingTradeVolume:
         raise TypeError("window must be a TradeWindow")
     empty = {
         "lookback": window.lookback,
+        "membership_rule": window.membership_rule,
         "product_id": window.product_id,
+        "retention_dropped_trade_count": window.retention_dropped_trade_count,
+        "retention_limit": window.retention_limit,
+        "time_field": window.time_field,
         "window_end": window.window_end,
         "window_start": window.window_start,
     }
@@ -1249,9 +1830,13 @@ def rolling_trade_volume_from_window(window: TradeWindow) -> RollingTradeVolume:
         last_observed_at=window.last_observed_at,
         last_sequence=window.last_sequence,
         lookback=window.lookback,
+        membership_rule=window.membership_rule,
         product_id=window.product_id,
         quote_volume=quote_volume,
+        retention_dropped_trade_count=window.retention_dropped_trade_count,
+        retention_limit=window.retention_limit,
         status=status,
+        time_field=window.time_field,
         trade_count=window.trade_count,
         valid_trade_count=valid_trade_count,
         window_end=window.window_end,
@@ -1281,6 +1866,31 @@ def _validate_lookback(value: timedelta) -> None:
         raise ValueError("lookback must be positive")
 
 
+def _validate_max_retained_trades(value: int | None) -> None:
+    if value is None:
+        return
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise TypeError("max_retained_trades must be an integer when provided")
+    if value <= 0:
+        raise ValueError("max_retained_trades must be positive")
+
+
+def _validate_max_retained_samples(value: int | None) -> None:
+    if value is None:
+        return
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise TypeError("max_retained_samples must be an integer when provided")
+    if value <= 0:
+        raise ValueError("max_retained_samples must be positive")
+
+
+def _validate_min_samples(value: int) -> None:
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise TypeError("min_samples must be an integer")
+    if value <= 0:
+        raise ValueError("min_samples must be positive")
+
+
 def _validate_interval(value: timedelta) -> None:
     if not isinstance(value, timedelta):
         raise TypeError("interval must be a datetime.timedelta")
@@ -1300,6 +1910,13 @@ def _validate_trade_tuple(trades: tuple[MarketTradeSnapshot, ...]) -> None:
         raise TypeError("trades must be a tuple")
     if any(not isinstance(trade, MarketTradeSnapshot) for trade in trades):
         raise TypeError("trades must contain MarketTradeSnapshot values")
+
+
+def _validate_order_book_sample_tuple(samples: tuple[MarketOrderBookSnapshot, ...]) -> None:
+    if not isinstance(samples, tuple):
+        raise TypeError("samples must be a tuple")
+    if any(not isinstance(sample, MarketOrderBookSnapshot) for sample in samples):
+        raise TypeError("samples must contain MarketOrderBookSnapshot values")
 
 
 def _validate_product_catalog(product_catalog: ProductCatalog | None) -> None:
@@ -1415,7 +2032,68 @@ def _bucket_trades(
             for trade in trades
             if isinstance(trade.observed_at, datetime) and start <= trade.observed_at < end
         )
-    return tuple(sorted(selected, key=lambda trade: trade.sequence))
+    return tuple(sorted(selected, key=_trade_sort_key))
+
+
+def _trade_sort_key(trade: MarketTradeSnapshot) -> tuple[datetime, int]:
+    observed_at = trade.observed_at
+    if not isinstance(observed_at, datetime):
+        raise ValueError("trade sort requires observed_at datetime")
+    return observed_at, trade.sequence
+
+
+def _book_sample_sort_key(sample: MarketOrderBookSnapshot) -> tuple[datetime, int]:
+    observed_at = sample.observed_at
+    if not isinstance(observed_at, datetime):
+        raise ValueError("order-book sample sort requires observed_at datetime")
+    return observed_at, sample.sequence
+
+
+def _order_book_window_stats_base(
+    window: OrderBookSampleWindow,
+    *,
+    levels: int | None,
+    max_distance_bps: Decimal | None,
+) -> dict[str, Any]:
+    return {
+        "available_sample_count": window.available_sample_count,
+        "first_observed_at": window.first_observed_at,
+        "first_sequence": window.first_sequence,
+        "last_observed_at": window.last_observed_at,
+        "last_sequence": window.last_sequence,
+        "levels": levels,
+        "lookback": window.lookback,
+        "max_distance_bps": max_distance_bps,
+        "membership_rule": window.membership_rule,
+        "min_samples": window.min_samples,
+        "product_id": window.product_id,
+        "retention_dropped_sample_count": window.retention_dropped_sample_count,
+        "retention_limit": window.retention_limit,
+        "sample_count": window.sample_count,
+        "source_sequences": window.source_sequences,
+        "timestamped_sample_count": window.timestamped_sample_count,
+        "time_field": window.time_field,
+        "window_end": window.window_end,
+        "window_start": window.window_start,
+    }
+
+
+def _decimal_average(values: tuple[Decimal, ...]) -> Decimal | None:
+    if not values:
+        return None
+    return sum(values, Decimal("0")) / Decimal(len(values))
+
+
+def _decimal_min(values: tuple[Decimal, ...]) -> Decimal | None:
+    if not values:
+        return None
+    return min(values)
+
+
+def _decimal_max(values: tuple[Decimal, ...]) -> Decimal | None:
+    if not values:
+        return None
+    return max(values)
 
 
 def _trade_window_for_bucket(
@@ -1425,6 +2103,7 @@ def _trade_window_for_bucket(
     start: datetime,
     end: datetime,
     interval: timedelta,
+    membership_rule: MarketSeriesMembershipRule,
 ) -> TradeWindow:
     return TradeWindow(
         available_trade_count=len(trades),
@@ -1433,10 +2112,14 @@ def _trade_window_for_bucket(
         last_observed_at=trades[-1].observed_at,
         last_sequence=trades[-1].sequence,
         lookback=interval,
+        membership_rule=membership_rule,
         product_id=product_id,
         source_sequences=tuple(trade.sequence for trade in trades),
+        retention_dropped_trade_count=0,
+        retention_limit=None,
         status=StrategyMarketDataStatus.OK,
         timestamped_trade_count=len(trades),
+        time_field=MarketSeriesTimeField.OBSERVED_AT,
         trade_count=len(trades),
         trades=trades,
         window_end=end,
@@ -1463,6 +2146,7 @@ def _candle_from_stats(stats: MarketWindowStats) -> MarketCandle:
         last_observed_at=stats.last_observed_at,
         last_sequence=stats.last_sequence,
         low=stats.low,
+        membership_rule=stats.membership_rule,
         net_aggressor_quote_volume=stats.net_aggressor_quote_volume,
         net_aggressor_volume=stats.net_aggressor_volume,
         open=stats.open,
@@ -1473,6 +2157,7 @@ def _candle_from_stats(stats: MarketWindowStats) -> MarketCandle:
         source_sequences=stats.source_sequences,
         start=stats.window_start,
         status=stats.status,
+        time_field=stats.time_field,
         trade_count=stats.trade_count,
         unclassified_trade_count=stats.unclassified_trade_count,
         valid_price_count=stats.valid_price_count,

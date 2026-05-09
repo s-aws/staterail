@@ -8,6 +8,8 @@ import pytest
 
 from core.enums import (
     ExecutionMode,
+    MarketSeriesMembershipRule,
+    MarketSeriesTimeField,
     OrderLifecycleStatus,
     OrderSide,
     ProductType,
@@ -39,6 +41,44 @@ def test_strategy_snapshot_market_data_helpers_return_replay_derived_state():
         product_id="AVA-29MAY26-CDE",
         sequence=10,
     )
+    projection.order_book_samples_by_product_id["AVA-29MAY26-CDE"] = [
+        MarketOrderBookSnapshot(
+            ask_levels={"91": "4"},
+            best_ask_price="91",
+            best_ask_size="4",
+            best_bid_price="89",
+            best_bid_size="2",
+            bid_levels={"89": "2"},
+            message_key="book-old",
+            observed_at=now - timedelta(minutes=10),
+            product_id="AVA-29MAY26-CDE",
+            sequence=9,
+        ),
+        MarketOrderBookSnapshot(
+            ask_levels={"101": "4"},
+            best_ask_price="101",
+            best_ask_size="4",
+            best_bid_price="99",
+            best_bid_size="2",
+            bid_levels={"99": "2"},
+            message_key="book-1",
+            observed_at=now - timedelta(seconds=60),
+            product_id="AVA-29MAY26-CDE",
+            sequence=11,
+        ),
+        MarketOrderBookSnapshot(
+            ask_levels={"102": "6"},
+            best_ask_price="102",
+            best_ask_size="6",
+            best_bid_price="100",
+            best_bid_size="3",
+            bid_levels={"100": "3"},
+            message_key="book-2",
+            observed_at=now - timedelta(seconds=30),
+            product_id="AVA-29MAY26-CDE",
+            sequence=12,
+        ),
+    ]
     _add_trade(
         projection,
         MarketTradeSnapshot(
@@ -109,7 +149,31 @@ def test_strategy_snapshot_market_data_helpers_return_replay_derived_state():
     market_spread = snapshot.spread("AVA-29MAY26-CDE")
     book_stats = snapshot.order_book_stats("AVA-29MAY26-CDE", levels=2)
     near_book_stats = snapshot.order_book_stats("AVA-29MAY26-CDE", max_distance_bps="150")
+    book_window = snapshot.order_book_sample_window(
+        "AVA-29MAY26-CDE",
+        lookback=timedelta(minutes=5),
+    )
+    book_window_stats = snapshot.order_book_window_stats(
+        "AVA-29MAY26-CDE",
+        levels=1,
+        lookback=timedelta(minutes=5),
+    )
+    retained_book_window_stats = snapshot.order_book_window_stats(
+        "AVA-29MAY26-CDE",
+        levels=1,
+        lookback=timedelta(minutes=5),
+        max_retained_samples=1,
+    )
+    retained_book_window = snapshot.order_book_sample_window(
+        "AVA-29MAY26-CDE",
+        lookback=timedelta(minutes=5),
+        max_retained_samples=1,
+    )
     latest = snapshot.latest_trade("AVA-29MAY26-CDE")
+    series_window = snapshot.market_series_window(
+        "AVA-29MAY26-CDE",
+        lookback=timedelta(minutes=5),
+    )
     window = snapshot.trade_window(
         "AVA-29MAY26-CDE",
         lookback=timedelta(minutes=5),
@@ -162,11 +226,42 @@ def test_strategy_snapshot_market_data_helpers_return_replay_derived_state():
     assert near_book_stats.ask_volume == Decimal("4")
     assert near_book_stats.bid_notional == Decimal("1980")
     assert near_book_stats.ask_notional == Decimal("4040")
+    assert book_window.status == StrategyMarketDataStatus.OK
+    assert book_window.sample_count == 2
+    assert book_window.source_sequences == (11, 12)
+    assert book_window.to_payload()["sample_sequences"] == [11, 12]
+    assert retained_book_window.status == StrategyMarketDataStatus.INSUFFICIENT_DATA
+    assert retained_book_window.sample_count == 1
+    assert retained_book_window.retention_dropped_sample_count == 1
+    assert book_window_stats.status == StrategyMarketDataStatus.OK
+    assert book_window_stats.valid_stats_count == 2
+    assert book_window_stats.average_spread == Decimal("2")
+    assert book_window_stats.average_midpoint == Decimal("100.5")
+    assert book_window_stats.average_bid_volume == Decimal("2.5")
+    assert book_window_stats.average_ask_volume == Decimal("5")
+    assert book_window_stats.average_book_imbalance == Decimal("-1") / Decimal("3")
+    assert book_window_stats.average_spread_bps == (
+        Decimal("200") + (Decimal("20000") / Decimal("101"))
+    ) / Decimal("2")
+    assert book_window_stats.to_payload()["valid_stats_count"] == 2
+    assert retained_book_window_stats.status == StrategyMarketDataStatus.INSUFFICIENT_DATA
+    assert retained_book_window_stats.valid_stats_count == 1
     assert latest.trade_id == "trade-2"
     assert latest.price == Decimal("101")
     assert latest.size == Decimal("3")
     assert latest.side == OrderSide.SELL
+    assert series_window.product_id == "AVA-29MAY26-CDE"
+    assert series_window.as_of == now
+    assert series_window.window_start == now - timedelta(minutes=5)
+    assert series_window.window_end == now
+    assert series_window.membership_rule == MarketSeriesMembershipRule.START_INCLUSIVE_END_INCLUSIVE
+    assert series_window.time_field == MarketSeriesTimeField.OBSERVED_AT
+    assert series_window.to_payload()["membership_rule"] == (
+        MarketSeriesMembershipRule.START_INCLUSIVE_END_INCLUSIVE.value
+    )
     assert window.status == StrategyMarketDataStatus.OK
+    assert window.membership_rule == MarketSeriesMembershipRule.START_INCLUSIVE_END_INCLUSIVE
+    assert window.time_field == MarketSeriesTimeField.OBSERVED_AT
     assert tuple(trade.trade_id for trade in window.trades) == ("trade-1", "trade-2")
     assert window.available_trade_count == 3
     assert window.timestamped_trade_count == 3
@@ -209,9 +304,15 @@ def test_strategy_snapshot_market_data_helpers_return_replay_derived_state():
     assert snapshot.notional(product_id="AVA-29MAY26-CDE", size="2", price="100") == Decimal("2000")
     assert window.to_payload()["trade_ids"] == ["trade-1", "trade-2"]
     assert window.to_payload()["source_sequences"] == [11, 12]
+    assert window.to_payload()["time_field"] == MarketSeriesTimeField.OBSERVED_AT.value
     assert stats.to_payload()["aggressor_imbalance"] == "-0.2"
+    assert stats.to_payload()["membership_rule"] == (
+        MarketSeriesMembershipRule.START_INCLUSIVE_END_INCLUSIVE.value
+    )
     assert stats.to_payload()["twap"] == "100.5"
     assert candles.status == StrategyMarketDataStatus.OK
+    assert candles.membership_rule == MarketSeriesMembershipRule.FIXED_BUCKETS_FINAL_END_INCLUSIVE
+    assert candles.time_field == MarketSeriesTimeField.OBSERVED_AT
     assert candles.aggressor_status == StrategyMarketDataStatus.OK
     assert candles.candle_count == 2
     assert candles.complete_candle_count == 1
@@ -219,8 +320,10 @@ def test_strategy_snapshot_market_data_helpers_return_replay_derived_state():
     assert candles.trade_count == 2
     assert candles.source_sequences == (11, 12)
     assert candles.candles[0].status == StrategyMarketDataStatus.MISSING
+    assert candles.candles[0].membership_rule == MarketSeriesMembershipRule.START_INCLUSIVE_END_EXCLUSIVE
     assert candles.candles[0].trade_count == 0
     assert candles.candles[1].status == StrategyMarketDataStatus.OK
+    assert candles.candles[1].membership_rule == MarketSeriesMembershipRule.START_INCLUSIVE_END_INCLUSIVE
     assert candles.candles[1].start == now - timedelta(minutes=1)
     assert candles.candles[1].end == now
     assert candles.candles[1].open == Decimal("100")
@@ -233,10 +336,153 @@ def test_strategy_snapshot_market_data_helpers_return_replay_derived_state():
     assert candles.candles[1].sell_aggressor_volume == Decimal("3")
     assert candles.candles[1].aggressor_imbalance == Decimal("-0.2")
     assert candles.candles[1].source_sequences == (11, 12)
+    assert candles.to_payload()["membership_rule"] == (
+        MarketSeriesMembershipRule.FIXED_BUCKETS_FINAL_END_INCLUSIVE.value
+    )
     assert candles.to_payload()["candles"][1]["close"] == "101"
     assert book_stats.to_payload()["book_imbalance"] == str(Decimal("-3") / Decimal("17"))
     assert volume.to_payload()["base_volume"] == "5"
     assert volume.to_payload()["status"] == StrategyMarketDataStatus.OK.value
+
+
+def test_strategy_snapshot_trade_windows_apply_explicit_retention_limit():
+    now = datetime(2026, 1, 1, 12, 5, tzinfo=timezone.utc)
+    projection = SourceOfTruthProjection()
+    _add_trade(
+        projection,
+        MarketTradeSnapshot(
+            message_key="trade-dropped",
+            observed_at=now - timedelta(seconds=90),
+            price="90",
+            product_id="AVA-29MAY26-CDE",
+            sequence=99,
+            side=OrderSide.BUY,
+            size="10",
+            trade_id="dropped",
+        ),
+    )
+    _add_trade(
+        projection,
+        MarketTradeSnapshot(
+            message_key="trade-1",
+            observed_at=now - timedelta(seconds=60),
+            price="100",
+            product_id="AVA-29MAY26-CDE",
+            sequence=11,
+            side=OrderSide.BUY,
+            size="2",
+            trade_id="trade-1",
+        ),
+    )
+    _add_trade(
+        projection,
+        MarketTradeSnapshot(
+            message_key="trade-2",
+            observed_at=now - timedelta(seconds=30),
+            price="101",
+            product_id="AVA-29MAY26-CDE",
+            sequence=12,
+            side=OrderSide.SELL,
+            size="3",
+            trade_id="trade-2",
+        ),
+    )
+    snapshot = StrategySnapshot(
+        as_of_sequence=99,
+        evaluated_at=now,
+        execution_mode=ExecutionMode.DRY_RUN,
+        ledger_path=Path("data/audit.jsonl"),
+        projection=projection,
+    )
+
+    window = snapshot.trade_window(
+        "AVA-29MAY26-CDE",
+        lookback=timedelta(minutes=5),
+        max_retained_trades=2,
+    )
+    series_window = snapshot.market_series_window(
+        "AVA-29MAY26-CDE",
+        lookback=timedelta(minutes=5),
+        max_retained_trades=2,
+    )
+    stats = snapshot.market_window_stats(
+        "AVA-29MAY26-CDE",
+        lookback=timedelta(minutes=5),
+        max_retained_trades=2,
+    )
+    candles = snapshot.candles(
+        "AVA-29MAY26-CDE",
+        interval=timedelta(minutes=1),
+        lookback=timedelta(minutes=2),
+        max_retained_trades=1,
+    )
+    volume = snapshot.rolling_trade_volume(
+        "AVA-29MAY26-CDE",
+        lookback=timedelta(minutes=5),
+        max_retained_trades=2,
+    )
+    count = snapshot.rolling_trade_count(
+        "AVA-29MAY26-CDE",
+        lookback=timedelta(minutes=5),
+        max_retained_trades=2,
+    )
+
+    assert series_window.retention_limit == 2
+    assert series_window.to_payload()["retention_limit"] == 2
+
+    assert window.status == StrategyMarketDataStatus.OK
+    assert tuple(trade.trade_id for trade in window.trades) == ("trade-1", "trade-2")
+    assert window.available_trade_count == 3
+    assert window.timestamped_trade_count == 3
+    assert window.trade_count == 2
+    assert window.retention_limit == 2
+    assert window.retention_dropped_trade_count == 1
+    assert window.source_sequences == (11, 12)
+    assert window.to_payload()["retention_limit"] == 2
+    assert window.to_payload()["retention_dropped_trade_count"] == 1
+
+    assert stats.status == StrategyMarketDataStatus.OK
+    assert stats.base_volume == Decimal("5")
+    assert stats.quote_volume == Decimal("503")
+    assert stats.retention_limit == 2
+    assert stats.retention_dropped_trade_count == 1
+    assert stats.source_sequences == (11, 12)
+    assert stats.to_payload()["retention_limit"] == 2
+
+    assert volume.status == StrategyMarketDataStatus.OK
+    assert volume.base_volume == Decimal("5")
+    assert volume.quote_volume == Decimal("503")
+    assert volume.retention_limit == 2
+    assert volume.retention_dropped_trade_count == 1
+    assert volume.to_payload()["retention_dropped_trade_count"] == 1
+
+    assert count.status == StrategyMarketDataStatus.OK
+    assert count.trade_count == 2
+    assert count.retention_limit == 2
+    assert count.retention_dropped_trade_count == 1
+
+    assert candles.status == StrategyMarketDataStatus.OK
+    assert candles.trade_count == 1
+    assert candles.retention_limit == 1
+    assert candles.retention_dropped_trade_count == 2
+    assert candles.source_sequences == (12,)
+    assert candles.candles[0].status == StrategyMarketDataStatus.MISSING
+    assert candles.candles[1].status == StrategyMarketDataStatus.OK
+    assert candles.candles[1].open == Decimal("101")
+    assert candles.to_payload()["retention_dropped_trade_count"] == 2
+
+    with pytest.raises(ValueError, match="max_retained_trades must be positive"):
+        snapshot.trade_window(
+            "AVA-29MAY26-CDE",
+            lookback=timedelta(minutes=5),
+            max_retained_trades=0,
+        )
+    with pytest.raises(TypeError, match="max_retained_trades must be an integer"):
+        snapshot.market_window_stats(
+            "AVA-29MAY26-CDE",
+            lookback=timedelta(minutes=5),
+            max_retained_trades=True,
+        )
 
 
 def test_strategy_snapshot_market_data_helpers_report_missing_stale_and_insufficient_data():
@@ -250,6 +496,16 @@ def test_strategy_snapshot_market_data_helpers_report_missing_stale_and_insuffic
         product_id="AVA-29MAY26-CDE",
         sequence=1,
     )
+    projection.order_book_samples_by_product_id["AVA-29MAY26-CDE"] = [
+        MarketOrderBookSnapshot(
+            best_bid_price="99",
+            best_bid_size="1",
+            message_key="partial-book",
+            observed_at=now,
+            product_id="AVA-29MAY26-CDE",
+            sequence=1,
+        )
+    ]
     _add_trade(
         projection,
         MarketTradeSnapshot(
@@ -305,10 +561,53 @@ def test_strategy_snapshot_market_data_helpers_report_missing_stale_and_insuffic
     assert partial_book_stats.status == StrategyMarketDataStatus.INSUFFICIENT_DATA
     assert partial_book_stats.best_bid_price == Decimal("99")
     assert partial_book_stats.best_ask_price is None
+    assert (
+        snapshot.order_book_sample_window("MISSING-USD", lookback=timedelta(minutes=5)).status
+        == StrategyMarketDataStatus.MISSING
+    )
+    assert (
+        snapshot.order_book_window_stats(
+            "MISSING-USD",
+            levels=1,
+            lookback=timedelta(minutes=5),
+        ).status
+        == StrategyMarketDataStatus.MISSING
+    )
+    partial_book_window = snapshot.order_book_sample_window(
+        "AVA-29MAY26-CDE",
+        lookback=timedelta(minutes=5),
+    )
+    assert partial_book_window.status == StrategyMarketDataStatus.INSUFFICIENT_DATA
+    assert partial_book_window.sample_count == 1
+    partial_book_window_stats = snapshot.order_book_window_stats(
+        "AVA-29MAY26-CDE",
+        levels=1,
+        lookback=timedelta(minutes=5),
+    )
+    assert partial_book_window_stats.status == StrategyMarketDataStatus.INSUFFICIENT_DATA
+    assert partial_book_window_stats.sample_count == 1
+    assert partial_book_window_stats.valid_stats_count == 0
     with pytest.raises(ValueError, match="either levels or max_distance_bps"):
         snapshot.order_book_stats("AVA-29MAY26-CDE")
+    with pytest.raises(ValueError, match="either levels or max_distance_bps"):
+        snapshot.order_book_window_stats(
+            "AVA-29MAY26-CDE",
+            lookback=timedelta(minutes=5),
+        )
     with pytest.raises(ValueError, match="mutually exclusive"):
         snapshot.order_book_stats("AVA-29MAY26-CDE", levels=1, max_distance_bps="50")
+    with pytest.raises(ValueError, match="max_retained_samples must be positive"):
+        snapshot.order_book_sample_window(
+            "AVA-29MAY26-CDE",
+            lookback=timedelta(minutes=5),
+            max_retained_samples=0,
+        )
+    with pytest.raises(TypeError, match="min_samples must be an integer"):
+        snapshot.order_book_sample_window(
+            "AVA-29MAY26-CDE",
+            lookback=timedelta(minutes=5),
+            min_samples=True,
+        )
     assert snapshot.latest_trade("MISSING-USD").status == StrategyMarketDataStatus.MISSING
     assert (
         snapshot.rolling_trade_volume("MISSING-USD", lookback=timedelta(minutes=5)).status

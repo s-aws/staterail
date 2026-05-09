@@ -20,6 +20,8 @@ from core.enums import (
     ActionType,
     EventType,
     ExecutionMode,
+    OperatorCanaryPlanIssue,
+    OperatorCanaryPlanStep,
     OrderLifecycleStatus,
     OrderSide,
     OrderType,
@@ -430,6 +432,429 @@ def test_cli_operator_open_orders_lists_tracked_open_orders_without_writing(
     assert payload["open_orders"][0]["exchange_order_id"] is not None
     assert payload["open_orders"][0]["product_id"] == "BTC-USD"
     assert after_records == before_records
+
+
+def test_cli_operator_canary_render_dry_run_config_writes_isolated_valid_config(
+    workspace_tmp_path,
+    capsys,
+):
+    live_ledger_path = workspace_tmp_path / "operator-canary-render-live.jsonl"
+    dry_run_ledger_path = workspace_tmp_path / "operator-canary-render-dry-run.jsonl"
+    live_config_path = workspace_tmp_path / "live-config.json"
+    dry_run_config_path = workspace_tmp_path / "rendered-dry-run-config.json"
+    product_id = "SHB-26JUN26-CDE"
+    risk = {
+        "allowed_order_types": [OrderType.LIMIT.value],
+        "allowed_products": [product_id],
+        "max_order_notional": "200",
+    }
+    live_config_path.write_text(
+        json.dumps(
+            {
+                "ledger_path": live_ledger_path.as_posix(),
+                "bot": {
+                    "audit_anchor": {"enabled": True, "run_on_start": True},
+                    "audit_archive": {"enabled": True, "run_on_start": True},
+                    "feed": {
+                        "health": {"enabled": True, "run_on_start": True},
+                        "min_live_sources": 2,
+                    },
+                    "product_catalog": {
+                        "enabled": True,
+                        "product_ids": [product_id],
+                        "run_on_start": True,
+                    },
+                    "reconciliation": {
+                        "exchange_state": {"enabled": True, "run_on_start": True},
+                        "fills": {"enabled": True, "run_on_start": True},
+                        "order_recovery": {"enabled": True, "run_on_start": True},
+                        "watchdog": {"enabled": True, "run_on_start": True},
+                    },
+                    "rest": {"execution_mode": ExecutionMode.LIVE.value},
+                    "risk": risk,
+                    "strategies": {"enabled": True, "run_on_start": True},
+                    "websocket_sources": [
+                        {
+                            "channels": ["level2"],
+                            "endpoint": "MARKET_DATA",
+                            "include_heartbeats": True,
+                            "product_ids": [product_id],
+                            "source_id": "market-primary",
+                        },
+                        {
+                            "channels": ["user"],
+                            "endpoint": "USER_ORDER_DATA",
+                            "include_heartbeats": True,
+                            "product_ids": [product_id],
+                            "source_id": "user-primary",
+                        },
+                    ],
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    exit_code = asyncio.run(
+        run_from_args(
+            argparse.Namespace(
+                config_file=str(live_config_path),
+                ledger_path=None,
+                operator_canary_dry_run_config_file=str(dry_run_config_path),
+                operator_canary_dry_run_config_force=False,
+                operator_canary_dry_run_ledger_path=str(dry_run_ledger_path),
+                operator_canary_render_dry_run_config=True,
+            )
+        )
+    )
+    payload = json.loads(capsys.readouterr().out)
+    rendered = json.loads(dry_run_config_path.read_text(encoding="utf-8"))
+    rendered_config = load_coinbase_application_config_from_json_file(dry_run_config_path)
+
+    assert exit_code == 0
+    assert payload["status"] == ReadinessStatus.OK.value
+    assert payload["validated"] is True
+    assert payload["writes_config"] is True
+    assert payload["writes_ledger"] is False
+    assert payload["runtime_tasks_started"] is False
+    assert payload["websocket_started"] is False
+    assert payload["order_endpoint_called"] is False
+    assert rendered["ledger_path"] == dry_run_ledger_path.as_posix()
+    assert rendered["bot"]["rest"]["execution_mode"] == ExecutionMode.DRY_RUN.value
+    assert rendered["bot"]["websocket_sources"] == []
+    assert rendered["bot"]["product_catalog"]["enabled"] is False
+    assert rendered["bot"]["feed"]["health"]["enabled"] is False
+    assert rendered["bot"]["reconciliation"]["watchdog"]["enabled"] is False
+    assert rendered["bot"]["reconciliation"]["order_recovery"]["enabled"] is False
+    assert rendered["bot"]["reconciliation"]["fills"]["enabled"] is False
+    assert rendered["bot"]["reconciliation"]["exchange_state"]["enabled"] is False
+    assert rendered["bot"]["audit_anchor"]["enabled"] is False
+    assert rendered["bot"]["audit_archive"]["enabled"] is False
+    assert rendered["bot"]["strategies"]["enabled"] is False
+    assert rendered["bot"]["trigger_polling"]["enabled"] is True
+    assert rendered["bot"]["trigger_polling"]["run_on_start"] is False
+    assert rendered_config.bot.rest.execution_mode == ExecutionMode.DRY_RUN
+    assert rendered_config.ledger_path == dry_run_ledger_path
+    assert rendered_config.bot.websocket_sources == ()
+    assert rendered_config.bot.risk.allowed_products == (product_id,)
+    assert not live_ledger_path.exists()
+    assert not dry_run_ledger_path.exists()
+
+    dry_run_exit_code = asyncio.run(
+        run_from_args(
+            argparse.Namespace(
+                config_file=str(dry_run_config_path),
+                ledger_path=None,
+                operator_id="operator-1",
+                operator_place_action_id="operator-rendered-canary",
+                operator_place_client_order_id="operator-rendered-client",
+                operator_place_leverage="1",
+                operator_place_limit_price="12.50",
+                operator_place_margin_type=None,
+                operator_place_order=True,
+                operator_place_order_type=OrderType.LIMIT.value,
+                operator_place_post_only=True,
+                operator_place_product_id=product_id,
+                operator_place_reason="rendered canary dry run",
+                operator_place_reduce_only=False,
+                operator_place_side=OrderSide.BUY.value,
+                operator_place_size="1",
+                operator_place_time_in_force=TimeInForce.GOOD_UNTIL_CANCELLED.value,
+            )
+        )
+    )
+    dry_run_payload = json.loads(capsys.readouterr().out)
+
+    assert dry_run_exit_code == 0
+    assert dry_run_payload["status"] == ReadinessStatus.OK.value
+    assert dry_run_payload["receipt"]["status"] == ActionStatus.EXECUTED.value
+    assert dry_run_payload["runtime_tasks_started"] is False
+    assert dry_run_payload["websocket_started"] is False
+    assert dry_run_ledger_path.exists()
+
+
+def test_cli_operator_canary_render_dry_run_config_refuses_overwrite_without_force(
+    workspace_tmp_path,
+):
+    live_config_path = workspace_tmp_path / "live-config.json"
+    dry_run_config_path = workspace_tmp_path / "rendered-dry-run-config.json"
+    dry_run_ledger_path = workspace_tmp_path / "operator-canary-dry-run.jsonl"
+    dry_run_config_path.write_text("{\"existing\": true}\n", encoding="utf-8")
+    live_config_path.write_text(
+        json.dumps(
+            {
+                "ledger_path": (workspace_tmp_path / "live.jsonl").as_posix(),
+                "bot": {"rest": {"execution_mode": ExecutionMode.LIVE.value}},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(FileExistsError, match="target config file already exists"):
+        asyncio.run(
+            run_from_args(
+                argparse.Namespace(
+                    config_file=str(live_config_path),
+                    ledger_path=None,
+                    operator_canary_dry_run_config_file=str(dry_run_config_path),
+                    operator_canary_dry_run_config_force=False,
+                    operator_canary_dry_run_ledger_path=str(dry_run_ledger_path),
+                    operator_canary_render_dry_run_config=True,
+                )
+            )
+        )
+
+    assert dry_run_config_path.read_text(encoding="utf-8") == "{\"existing\": true}\n"
+    assert not dry_run_ledger_path.exists()
+
+
+def test_cli_operator_canary_plan_outputs_repeatable_sequence_without_writing(
+    workspace_tmp_path,
+    capsys,
+):
+    live_ledger_path = workspace_tmp_path / "operator-canary-live.jsonl"
+    dry_run_ledger_path = workspace_tmp_path / "operator-canary-dry-run.jsonl"
+    live_config_path = workspace_tmp_path / "live-config.json"
+    dry_run_config_path = workspace_tmp_path / "dry-run-config.json"
+    risk = {
+        "allowed_order_types": [OrderType.LIMIT.value],
+        "allowed_products": ["SHB-26JUN26-CDE"],
+        "max_order_notional": "200",
+    }
+    live_config_path.write_text(
+        json.dumps(
+            {
+                "ledger_path": live_ledger_path.as_posix(),
+                "bot": {
+                    "rest": {"execution_mode": ExecutionMode.LIVE.value},
+                    "risk": risk,
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    dry_run_config_path.write_text(
+        json.dumps(
+            {
+                "ledger_path": dry_run_ledger_path.as_posix(),
+                "bot": {
+                    "rest": {"execution_mode": ExecutionMode.DRY_RUN.value},
+                    "risk": risk,
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    exit_code = asyncio.run(
+        run_from_args(
+            argparse.Namespace(
+                config_file=str(live_config_path),
+                ledger_path=None,
+                operator_canary_dry_run_config_file=str(dry_run_config_path),
+                operator_canary_plan=True,
+                operator_id="operator-1",
+                operator_place_leverage="1",
+                operator_place_limit_price="12.50",
+                operator_place_margin_type=None,
+                operator_place_order_type=OrderType.LIMIT.value,
+                operator_place_post_only=True,
+                operator_place_product_id="SHB-26JUN26-CDE",
+                operator_place_reason="operator canary",
+                operator_place_reduce_only=False,
+                operator_place_side=OrderSide.BUY.value,
+                operator_place_size="1",
+                operator_place_time_in_force=TimeInForce.GOOD_UNTIL_CANCELLED.value,
+            )
+        )
+    )
+    payload = json.loads(capsys.readouterr().out)
+    steps = {step["step"]: step for step in payload["steps"]}
+
+    assert exit_code == 0
+    assert payload["status"] == ReadinessStatus.OK.value
+    assert payload["writes_ledger"] is False
+    assert payload["runtime_tasks_started"] is False
+    assert payload["websocket_started"] is False
+    assert payload["issues"] == []
+    assert payload["ledger_paths"] == {
+        "dry_run": dry_run_ledger_path.as_posix(),
+        "live": live_ledger_path.as_posix(),
+    }
+    assert list(steps) == [
+        OperatorCanaryPlanStep.DRY_RUN_PLACE_ORDER.value,
+        OperatorCanaryPlanStep.DRY_RUN_OPEN_ORDERS.value,
+        OperatorCanaryPlanStep.DRY_RUN_CANCEL_ALL_OPEN_ORDERS.value,
+        OperatorCanaryPlanStep.DRY_RUN_LEDGER_HEALTH.value,
+        OperatorCanaryPlanStep.READINESS.value,
+        OperatorCanaryPlanStep.LIVE_NO_ORDER_PREFLIGHT.value,
+        OperatorCanaryPlanStep.LIVE_RUNTIME_GATE.value,
+        OperatorCanaryPlanStep.LIVE_PLACE_ORDER.value,
+        OperatorCanaryPlanStep.LIVE_OPEN_ORDERS.value,
+        OperatorCanaryPlanStep.LIVE_CANCEL_ORDER.value,
+        OperatorCanaryPlanStep.SOURCE_OF_TRUTH.value,
+        OperatorCanaryPlanStep.LEDGER_HEALTH.value,
+    ]
+    assert steps[OperatorCanaryPlanStep.DRY_RUN_PLACE_ORDER.value]["calls_order_endpoint"] is True
+    assert steps[OperatorCanaryPlanStep.DRY_RUN_PLACE_ORDER.value]["live_order_endpoint"] is False
+    assert steps[OperatorCanaryPlanStep.LIVE_PLACE_ORDER.value]["calls_order_endpoint"] is True
+    assert steps[OperatorCanaryPlanStep.LIVE_PLACE_ORDER.value]["live_order_endpoint"] is True
+    assert "--operator-place-order" in steps[OperatorCanaryPlanStep.LIVE_PLACE_ORDER.value]["argv"]
+    assert "--operator-cancel-exchange-order-id" in steps[OperatorCanaryPlanStep.LIVE_CANCEL_ORDER.value]["argv"]
+    assert not live_ledger_path.exists()
+    assert not dry_run_ledger_path.exists()
+
+
+def test_cli_operator_canary_plan_includes_strategy_simulation_only_when_scheduled(
+    workspace_tmp_path,
+    capsys,
+):
+    live_ledger_path = workspace_tmp_path / "operator-canary-live-strategy.jsonl"
+    dry_run_ledger_path = workspace_tmp_path / "operator-canary-dry-run-strategy.jsonl"
+    live_config_path = workspace_tmp_path / "live-strategy-config.json"
+    dry_run_config_path = workspace_tmp_path / "dry-run-strategy-config.json"
+    risk = {
+        "allowed_order_types": [OrderType.LIMIT.value],
+        "allowed_products": ["SHB-26JUN26-CDE"],
+        "max_order_notional": "200",
+    }
+    live_config_path.write_text(
+        json.dumps(
+            {
+                "ledger_path": live_ledger_path.as_posix(),
+                "bot": {
+                    "rest": {"execution_mode": ExecutionMode.LIVE.value},
+                    "risk": risk,
+                    "strategies": {
+                        "enabled": True,
+                        "strategy_ids": ["noop"],
+                    },
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    dry_run_config_path.write_text(
+        json.dumps(
+            {
+                "ledger_path": dry_run_ledger_path.as_posix(),
+                "bot": {
+                    "rest": {"execution_mode": ExecutionMode.DRY_RUN.value},
+                    "risk": risk,
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    exit_code = asyncio.run(
+        run_from_args(
+            argparse.Namespace(
+                config_file=str(live_config_path),
+                ledger_path=None,
+                operator_canary_dry_run_config_file=str(dry_run_config_path),
+                operator_canary_plan=True,
+                operator_id="operator-1",
+                operator_place_leverage="1",
+                operator_place_limit_price="12.50",
+                operator_place_margin_type=None,
+                operator_place_order_type=OrderType.LIMIT.value,
+                operator_place_post_only=True,
+                operator_place_product_id="SHB-26JUN26-CDE",
+                operator_place_reason="operator canary",
+                operator_place_reduce_only=False,
+                operator_place_side=OrderSide.BUY.value,
+                operator_place_size="1",
+                operator_place_time_in_force=TimeInForce.GOOD_UNTIL_CANCELLED.value,
+            )
+        )
+    )
+    payload = json.loads(capsys.readouterr().out)
+    step_names = [step["step"] for step in payload["steps"]]
+
+    assert exit_code == 0
+    assert payload["status"] == ReadinessStatus.OK.value
+    assert OperatorCanaryPlanStep.STRATEGY_SIMULATION.value in step_names
+    assert step_names.index(OperatorCanaryPlanStep.STRATEGY_SIMULATION.value) == (
+        step_names.index(OperatorCanaryPlanStep.LIVE_RUNTIME_GATE.value) - 1
+    )
+    assert not live_ledger_path.exists()
+    assert not dry_run_ledger_path.exists()
+
+
+def test_cli_operator_canary_plan_reports_safety_issues_without_writing(
+    workspace_tmp_path,
+    capsys,
+):
+    live_ledger_path = workspace_tmp_path / "operator-canary-live-attention.jsonl"
+    dry_run_ledger_path = workspace_tmp_path / "operator-canary-dry-run-attention.jsonl"
+    live_config_path = workspace_tmp_path / "live-config.json"
+    dry_run_config_path = workspace_tmp_path / "dry-run-config.json"
+    live_config_path.write_text(
+        json.dumps(
+            {
+                "ledger_path": live_ledger_path.as_posix(),
+                "bot": {
+                    "rest": {"execution_mode": ExecutionMode.DRY_RUN.value},
+                    "risk": {
+                        "allowed_order_types": [OrderType.LIMIT.value],
+                        "allowed_products": ["AVA-29MAY26-CDE"],
+                        "kill_switch_enabled": True,
+                    },
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    dry_run_config_path.write_text(
+        json.dumps(
+            {
+                "ledger_path": dry_run_ledger_path.as_posix(),
+                "bot": {
+                    "rest": {"execution_mode": ExecutionMode.DRY_RUN.value},
+                    "risk": {"allowed_products": ["AVA-29MAY26-CDE"]},
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    exit_code = asyncio.run(
+        run_from_args(
+            argparse.Namespace(
+                config_file=str(live_config_path),
+                ledger_path=None,
+                operator_canary_dry_run_config_file=str(dry_run_config_path),
+                operator_canary_plan=True,
+                operator_id="operator-1",
+                operator_place_leverage=None,
+                operator_place_limit_price="0",
+                operator_place_margin_type=None,
+                operator_place_order_type=OrderType.LIMIT.value,
+                operator_place_post_only=False,
+                operator_place_product_id="SHB-26JUN26-CDE",
+                operator_place_reason="operator canary",
+                operator_place_reduce_only=False,
+                operator_place_side=OrderSide.BUY.value,
+                operator_place_size="0",
+                operator_place_time_in_force=TimeInForce.GOOD_UNTIL_CANCELLED.value,
+            )
+        )
+    )
+    payload = json.loads(capsys.readouterr().out)
+    issue_names = {issue["issue"] for issue in payload["issues"]}
+
+    assert exit_code == ATTENTION_REQUIRED_EXIT_CODE
+    assert payload["status"] == ReadinessStatus.ATTENTION_REQUIRED.value
+    assert payload["writes_ledger"] is False
+    assert OperatorCanaryPlanIssue.LIVE_CONFIG_NOT_LIVE.value in issue_names
+    assert OperatorCanaryPlanIssue.KILL_SWITCH_ENABLED.value in issue_names
+    assert OperatorCanaryPlanIssue.PRODUCT_OUTSIDE_RISK_SCOPE.value in issue_names
+    assert OperatorCanaryPlanIssue.UNSUPPORTED_POST_ONLY.value in issue_names
+    assert OperatorCanaryPlanIssue.NON_POSITIVE_SIZE.value in issue_names
+    assert OperatorCanaryPlanIssue.NON_POSITIVE_LIMIT_PRICE.value in issue_names
+    assert not live_ledger_path.exists()
+    assert not dry_run_ledger_path.exists()
 
 
 def test_cli_operator_cancel_all_open_orders_routes_each_cancel_through_gateway(

@@ -4,6 +4,24 @@ All notable changes to StateRail are documented here.
 
 This changelog starts with the first public StateRail release.
 
+## Unreleased
+
+## 0.1.4 - 2026-05-09
+
+### Added
+
+- Added an operator canary dry-run config renderer that derives an isolated dry-run rehearsal config from the live config while preserving risk scope.
+- Added explicit normalized market-series window metadata for strategy trade windows, candles, rolling trade volume, and rolling trade count.
+- Added a configurable strategy snapshot replay cap for retained accepted market trades per product, with replay metadata reporting dropped trades.
+- Added replay-backed order-book sample retention and an `order_book_sample_window()` strategy helper that reports insufficient data unless enough retained samples exist in the requested window.
+- Added `order_book_window_stats()` for derived spread, midpoint, volume, and imbalance metrics over retained replay-backed order-book sample windows.
+- Added an optional retained order-book sample depth cap per side for strategy snapshot replay, while keeping latest-book projection state full-depth.
+
+### Changed
+
+- Updated operator canary documentation so dry-run rehearsal uses the rendered dry-run config instead of the live config.
+- Updated strategy documentation to describe the market-series time field and membership-rule contract.
+
 ## 0.1.3 - 2026-05-09
 
 ### Added

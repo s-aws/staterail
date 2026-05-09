@@ -504,7 +504,25 @@ class LedgerHealthAcknowledgementSnapshot:
 
 
 class SourceOfTruthProjection:
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        *,
+        max_market_trades_per_product: int | None = None,
+        max_order_book_sample_depth_per_side: int | None = None,
+        max_order_book_samples_per_product: int = 1,
+    ) -> None:
+        _validate_optional_positive_int(
+            max_market_trades_per_product,
+            "max_market_trades_per_product",
+        )
+        _validate_optional_positive_int(
+            max_order_book_sample_depth_per_side,
+            "max_order_book_sample_depth_per_side",
+        )
+        _validate_positive_int(
+            max_order_book_samples_per_product,
+            "max_order_book_samples_per_product",
+        )
         self.actions: dict[str, ActionSnapshot] = {}
         self.audit_anchors: list[LedgerAnchorSnapshot] = []
         self.audit_archives: list[LedgerArchiveSnapshot] = []
@@ -518,8 +536,14 @@ class SourceOfTruthProjection:
         self.feed_sources: dict[str, FeedSourceSnapshot] = {}
         self.latest_tickers_by_product_id: dict[str, MarketTickerSnapshot] = {}
         self.order_books_by_product_id: dict[str, MarketOrderBookSnapshot] = {}
+        self.order_book_samples_by_product_id: dict[str, list[MarketOrderBookSnapshot]] = {}
+        self.order_book_sample_retention_dropped_by_product_id: dict[str, int] = {}
+        self.max_order_book_sample_depth_per_side = max_order_book_sample_depth_per_side
+        self.max_order_book_samples_per_product = max_order_book_samples_per_product
         self.market_trades_by_id: dict[str, MarketTradeSnapshot] = {}
         self.market_trade_ids_by_product_id: dict[str, list[str]] = {}
+        self.market_trade_retention_dropped_by_product_id: dict[str, int] = {}
+        self.max_market_trades_per_product = max_market_trades_per_product
         self.orders_by_action_id: dict[str, OrderSnapshot] = {}
         self.orders_by_client_order_id: dict[str, OrderSnapshot] = {}
         self.orders_by_exchange_order_id: dict[str, OrderSnapshot] = {}
@@ -558,15 +582,37 @@ class SourceOfTruthProjection:
         self.last_record_hash: str | None = None
 
     @classmethod
-    def from_ledger(cls, ledger: AuditLedger) -> "SourceOfTruthProjection":
-        projection = cls()
+    def from_ledger(
+        cls,
+        ledger: AuditLedger,
+        *,
+        max_market_trades_per_product: int | None = None,
+        max_order_book_sample_depth_per_side: int | None = None,
+        max_order_book_samples_per_product: int = 1,
+    ) -> "SourceOfTruthProjection":
+        projection = cls(
+            max_market_trades_per_product=max_market_trades_per_product,
+            max_order_book_sample_depth_per_side=max_order_book_sample_depth_per_side,
+            max_order_book_samples_per_product=max_order_book_samples_per_product,
+        )
         for record in ledger.iter_records():
             projection.apply(record)
         return projection
 
     @classmethod
-    def from_records(cls, records: Iterable[AuditRecord]) -> "SourceOfTruthProjection":
-        projection = cls()
+    def from_records(
+        cls,
+        records: Iterable[AuditRecord],
+        *,
+        max_market_trades_per_product: int | None = None,
+        max_order_book_sample_depth_per_side: int | None = None,
+        max_order_book_samples_per_product: int = 1,
+    ) -> "SourceOfTruthProjection":
+        projection = cls(
+            max_market_trades_per_product=max_market_trades_per_product,
+            max_order_book_sample_depth_per_side=max_order_book_sample_depth_per_side,
+            max_order_book_samples_per_product=max_order_book_samples_per_product,
+        )
         for record in records:
             projection.apply(record)
         return projection
@@ -729,11 +775,25 @@ class SourceOfTruthProjection:
     def market_trade_count(self) -> int:
         return len(self.market_trades_by_id)
 
+    @property
+    def market_trade_retention_dropped_count(self) -> int:
+        return sum(self.market_trade_retention_dropped_by_product_id.values())
+
+    @property
+    def order_book_sample_retention_dropped_count(self) -> int:
+        return sum(self.order_book_sample_retention_dropped_by_product_id.values())
+
     def latest_ticker(self, product_id: str) -> MarketTickerSnapshot | None:
         return self.latest_tickers_by_product_id.get(product_id)
 
     def order_book(self, product_id: str) -> MarketOrderBookSnapshot | None:
         return self.order_books_by_product_id.get(product_id)
+
+    def order_book_samples_for_product(
+        self,
+        product_id: str,
+    ) -> tuple[MarketOrderBookSnapshot, ...]:
+        return tuple(self.order_book_samples_by_product_id.get(product_id, ()))
 
     def market_trades_for_product(self, product_id: str) -> tuple[MarketTradeSnapshot, ...]:
         return tuple(
@@ -847,7 +907,19 @@ class SourceOfTruthProjection:
             "logical_order_id_by_action_id": self.logical_order_id_by_action_id,
             "logical_orders": self.logical_orders_by_id,
             "market_order_books": self.order_books_by_product_id,
+            "market_order_book_sample_retention": {
+                "dropped_by_product_id": self.order_book_sample_retention_dropped_by_product_id,
+                "dropped_count": self.order_book_sample_retention_dropped_count,
+                "max_order_book_sample_depth_per_side": self.max_order_book_sample_depth_per_side,
+                "max_order_book_samples_per_product": self.max_order_book_samples_per_product,
+            },
+            "market_order_book_samples_by_product_id": self.order_book_samples_by_product_id,
             "market_tickers": self.latest_tickers_by_product_id,
+            "market_trade_retention": {
+                "dropped_by_product_id": self.market_trade_retention_dropped_by_product_id,
+                "dropped_count": self.market_trade_retention_dropped_count,
+                "max_market_trades_per_product": self.max_market_trades_per_product,
+            },
             "market_trade_ids_by_product_id": self.market_trade_ids_by_product_id,
             "market_trades": self.market_trades_by_id,
             "open_order_action_ids": [order.action_id for order in self.open_orders],
@@ -1848,6 +1920,7 @@ class SourceOfTruthProjection:
         context: "_MarketDataContext",
     ) -> None:
         reset_snapshot_products: set[str] = set()
+        updated_products: set[str] = set()
         for event in _events(raw_payload.get("events")):
             event_product_id = _string_or_none(event.get("product_id"))
             event_type = _string_or_none(event.get("type"))
@@ -1884,6 +1957,34 @@ class SourceOfTruthProjection:
                 book.timestamp = _first_string(update, "event_time", "time", "timestamp") or context.timestamp
                 book.update_count += 1
                 _update_order_book_level(book, side=side, price=price, quantity=quantity)
+                updated_products.add(product_id)
+
+        for product_id in sorted(updated_products):
+            book = self.order_books_by_product_id.get(product_id)
+            if book is not None:
+                self._append_order_book_sample(product_id, book)
+
+    def _append_order_book_sample(
+        self,
+        product_id: str,
+        book: MarketOrderBookSnapshot,
+    ) -> None:
+        samples = self.order_book_samples_by_product_id.setdefault(product_id, [])
+        samples.append(
+            _copy_order_book_snapshot(
+                book,
+                max_depth_per_side=self.max_order_book_sample_depth_per_side,
+            )
+        )
+        dropped_count = 0
+        while len(samples) > self.max_order_book_samples_per_product:
+            samples.pop(0)
+            dropped_count += 1
+        if dropped_count:
+            self.order_book_sample_retention_dropped_by_product_id[product_id] = (
+                self.order_book_sample_retention_dropped_by_product_id.get(product_id, 0)
+                + dropped_count
+            )
 
     def _apply_market_trade_payloads(
         self,
@@ -1912,6 +2013,24 @@ class SourceOfTruthProjection:
             )
             if is_new_trade:
                 self.market_trade_ids_by_product_id.setdefault(product_id, []).append(trade_id)
+                self._enforce_market_trade_retention(product_id)
+
+    def _enforce_market_trade_retention(self, product_id: str) -> None:
+        if self.max_market_trades_per_product is None:
+            return
+        trade_ids = self.market_trade_ids_by_product_id.get(product_id)
+        if trade_ids is None:
+            return
+        dropped_count = 0
+        while len(trade_ids) > self.max_market_trades_per_product:
+            dropped_trade_id = trade_ids.pop(0)
+            self.market_trades_by_id.pop(dropped_trade_id, None)
+            dropped_count += 1
+        if dropped_count:
+            self.market_trade_retention_dropped_by_product_id[product_id] = (
+                self.market_trade_retention_dropped_by_product_id.get(product_id, 0)
+                + dropped_count
+            )
 
     def _apply_exchange_order_update(self, record: AuditRecord, order_update: Mapping[str, JsonValue]) -> None:
         order = self._order_by_exchange_update(order_update)
@@ -2112,6 +2231,66 @@ def _sync_order_book_top(book: MarketOrderBookSnapshot) -> None:
     book.best_bid_size = book.bid_levels.get(best_bid_price) if best_bid_price is not None else None
     book.best_ask_price = best_ask_price
     book.best_ask_size = book.ask_levels.get(best_ask_price) if best_ask_price is not None else None
+
+
+def _copy_order_book_snapshot(
+    book: MarketOrderBookSnapshot,
+    *,
+    max_depth_per_side: int | None,
+) -> MarketOrderBookSnapshot:
+    copied = MarketOrderBookSnapshot(
+        ask_levels=_retained_order_book_levels(
+            book.ask_levels,
+            max_depth_per_side=max_depth_per_side,
+            side=OrderBookSide.ASK,
+        ),
+        best_ask_price=book.best_ask_price,
+        best_ask_size=book.best_ask_size,
+        best_bid_price=book.best_bid_price,
+        best_bid_size=book.best_bid_size,
+        bid_levels=_retained_order_book_levels(
+            book.bid_levels,
+            max_depth_per_side=max_depth_per_side,
+            side=OrderBookSide.BID,
+        ),
+        exchange_sequence=book.exchange_sequence,
+        message_key=book.message_key,
+        observed_at=book.observed_at,
+        payload=dict(book.payload),
+        product_id=book.product_id,
+        sequence=book.sequence,
+        source_id=book.source_id,
+        timestamp=book.timestamp,
+        update_count=book.update_count,
+    )
+    _sync_order_book_top(copied)
+    return copied
+
+
+def _retained_order_book_levels(
+    levels: Mapping[str, str],
+    *,
+    max_depth_per_side: int | None,
+    side: OrderBookSide,
+) -> dict[str, str]:
+    if max_depth_per_side is None or len(levels) <= max_depth_per_side:
+        return dict(levels)
+    parsed_levels = tuple(
+        (price, quantity, parsed_price)
+        for price, quantity in levels.items()
+        if (parsed_price := _decimal_or_none(price)) is not None
+    )
+    sorted_levels = sorted(
+        parsed_levels,
+        key=lambda item: item[2],
+        reverse=(side == OrderBookSide.BID),
+    )
+    retained_prices = {price for price, _quantity, _parsed_price in sorted_levels[:max_depth_per_side]}
+    return {
+        price: quantity
+        for price, quantity in levels.items()
+        if price in retained_prices
+    }
 
 
 def _best_price(levels: Mapping[str, str], *, side: OrderBookSide) -> str | None:
@@ -2508,6 +2687,19 @@ def _int_or_none(value: Any) -> int | None:
 def _int_or_zero(value: Any) -> int:
     parsed = _int_or_none(value)
     return parsed if parsed is not None and parsed >= 0 else 0
+
+
+def _validate_optional_positive_int(value: int | None, field_name: str) -> None:
+    if value is None:
+        return
+    _validate_positive_int(value, field_name)
+
+
+def _validate_positive_int(value: int, field_name: str) -> None:
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise TypeError(f"{field_name} must be an integer when provided")
+    if value <= 0:
+        raise ValueError(f"{field_name} must be positive")
 
 
 def _float_or_none(value: Any) -> float | None:

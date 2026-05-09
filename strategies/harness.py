@@ -75,6 +75,9 @@ from strategies.market_data import (
     MarketCandles,
     MarketMidpoint,
     MarketOrderBookStats,
+    OrderBookWindowStats,
+    OrderBookSampleWindow,
+    MarketSeriesWindow,
     MarketSpread,
     MarketWindowStats,
     RollingTradeCount,
@@ -83,9 +86,12 @@ from strategies.market_data import (
     best_bid_ask,
     candles,
     latest_trade,
+    market_series_window,
     market_window_stats,
     midpoint,
     order_book_stats,
+    order_book_sample_window,
+    order_book_window_stats,
     rolling_trade_count,
     rolling_trade_volume,
     spread,
@@ -230,22 +236,89 @@ class StrategySnapshot:
             product_catalog=self.product_catalog,
         )
 
+    def order_book_sample_window(
+        self,
+        product_id: str,
+        *,
+        lookback: timedelta,
+        max_retained_samples: int | None = None,
+        min_samples: int = 2,
+    ) -> OrderBookSampleWindow:
+        return order_book_sample_window(
+            self.projection,
+            as_of=self.evaluated_at,
+            lookback=lookback,
+            max_retained_samples=max_retained_samples,
+            min_samples=min_samples,
+            product_id=product_id,
+        )
+
+    def order_book_window_stats(
+        self,
+        product_id: str,
+        *,
+        lookback: timedelta,
+        levels: int | None = None,
+        max_distance_bps: "AmountInput | None" = None,
+        max_retained_samples: int | None = None,
+        min_samples: int = 2,
+    ) -> OrderBookWindowStats:
+        return order_book_window_stats(
+            self.projection,
+            as_of=self.evaluated_at,
+            levels=levels,
+            lookback=lookback,
+            max_distance_bps=max_distance_bps,
+            max_retained_samples=max_retained_samples,
+            min_samples=min_samples,
+            product_catalog=self.product_catalog,
+            product_id=product_id,
+        )
+
     def latest_trade(self, product_id: str) -> LatestMarketTrade:
         return latest_trade(self.projection, product_id)
 
-    def trade_window(self, product_id: str, *, lookback: timedelta) -> TradeWindow:
+    def market_series_window(
+        self,
+        product_id: str,
+        *,
+        lookback: timedelta,
+        max_retained_trades: int | None = None,
+    ) -> MarketSeriesWindow:
+        return market_series_window(
+            as_of=self.evaluated_at,
+            lookback=lookback,
+            max_retained_trades=max_retained_trades,
+            product_id=product_id,
+        )
+
+    def trade_window(
+        self,
+        product_id: str,
+        *,
+        lookback: timedelta,
+        max_retained_trades: int | None = None,
+    ) -> TradeWindow:
         return trade_window(
             self.projection,
             as_of=self.evaluated_at,
             lookback=lookback,
+            max_retained_trades=max_retained_trades,
             product_id=product_id,
         )
 
-    def market_window_stats(self, product_id: str, *, lookback: timedelta) -> MarketWindowStats:
+    def market_window_stats(
+        self,
+        product_id: str,
+        *,
+        lookback: timedelta,
+        max_retained_trades: int | None = None,
+    ) -> MarketWindowStats:
         return market_window_stats(
             self.projection,
             as_of=self.evaluated_at,
             lookback=lookback,
+            max_retained_trades=max_retained_trades,
             product_id=product_id,
         )
 
@@ -255,12 +328,14 @@ class StrategySnapshot:
         *,
         interval: timedelta,
         lookback: timedelta,
+        max_retained_trades: int | None = None,
     ) -> MarketCandles:
         return candles(
             self.projection,
             as_of=self.evaluated_at,
             interval=interval,
             lookback=lookback,
+            max_retained_trades=max_retained_trades,
             product_id=product_id,
         )
 
@@ -269,19 +344,28 @@ class StrategySnapshot:
         product_id: str,
         *,
         lookback: timedelta,
+        max_retained_trades: int | None = None,
     ) -> RollingTradeVolume:
         return rolling_trade_volume(
             self.projection,
             as_of=self.evaluated_at,
             lookback=lookback,
+            max_retained_trades=max_retained_trades,
             product_id=product_id,
         )
 
-    def rolling_trade_count(self, product_id: str, *, lookback: timedelta) -> RollingTradeCount:
+    def rolling_trade_count(
+        self,
+        product_id: str,
+        *,
+        lookback: timedelta,
+        max_retained_trades: int | None = None,
+    ) -> RollingTradeCount:
         return rolling_trade_count(
             self.projection,
             as_of=self.evaluated_at,
             lookback=lookback,
+            max_retained_trades=max_retained_trades,
             product_id=product_id,
         )
 
@@ -1133,6 +1217,9 @@ class StrategyEvaluationTask:
         execution_mode: ExecutionMode,
         strategies: tuple[Strategy, ...],
         market_data_requirements: tuple[StrategyInputRequirement, ...] = (),
+        max_market_trades_per_product: int | None = None,
+        max_order_book_sample_depth_per_side: int | None = None,
+        max_order_book_samples_per_product: int = 1,
         clock: Clock | None = None,
         operator_policy: OperatorPolicy | None = None,
         product_catalog: ProductCatalog | None = None,
@@ -1152,11 +1239,39 @@ class StrategyEvaluationTask:
                 raise TypeError(
                     "market_data_requirements must contain StrategyInputRequirement values"
                 )
+        if max_market_trades_per_product is not None:
+            if isinstance(max_market_trades_per_product, bool) or not isinstance(
+                max_market_trades_per_product,
+                int,
+            ):
+                raise TypeError("max_market_trades_per_product must be an integer when provided")
+            if max_market_trades_per_product <= 0:
+                raise ValueError("max_market_trades_per_product must be positive")
+        if max_order_book_sample_depth_per_side is not None:
+            if isinstance(max_order_book_sample_depth_per_side, bool) or not isinstance(
+                max_order_book_sample_depth_per_side,
+                int,
+            ):
+                raise TypeError(
+                    "max_order_book_sample_depth_per_side must be an integer when provided"
+                )
+            if max_order_book_sample_depth_per_side <= 0:
+                raise ValueError("max_order_book_sample_depth_per_side must be positive")
+        if isinstance(max_order_book_samples_per_product, bool) or not isinstance(
+            max_order_book_samples_per_product,
+            int,
+        ):
+            raise TypeError("max_order_book_samples_per_product must be an integer")
+        if max_order_book_samples_per_product <= 0:
+            raise ValueError("max_order_book_samples_per_product must be positive")
         self._core = core
         self._action_gateway = action_gateway
         self._executor = executor
         self._execution_mode = execution_mode
         self._market_data_requirements = market_data_requirements
+        self._max_market_trades_per_product = max_market_trades_per_product
+        self._max_order_book_sample_depth_per_side = max_order_book_sample_depth_per_side
+        self._max_order_book_samples_per_product = max_order_book_samples_per_product
         self._operator_policy = _operator_policy_or_none(operator_policy)
         self._strategies = _validated_strategies(strategies)
         self._clock = clock or SystemClock()
@@ -1193,6 +1308,11 @@ class StrategyEvaluationTask:
                 "market_data_requirements": [
                     requirement.to_payload() for requirement in self._market_data_requirements
                 ],
+                "max_market_trades_per_product": self._max_market_trades_per_product,
+                "max_order_book_sample_depth_per_side": (
+                    self._max_order_book_sample_depth_per_side
+                ),
+                "max_order_book_samples_per_product": self._max_order_book_samples_per_product,
                 "strategy_id": strategy_id,
                 "strategy_index": strategy_index,
             },
@@ -1326,7 +1446,12 @@ class StrategyEvaluationTask:
             )
 
     def _snapshot(self) -> StrategySnapshot:
-        projection = SourceOfTruthProjection.from_ledger(self._core.ledger)
+        projection = SourceOfTruthProjection.from_ledger(
+            self._core.ledger,
+            max_market_trades_per_product=self._max_market_trades_per_product,
+            max_order_book_sample_depth_per_side=self._max_order_book_sample_depth_per_side,
+            max_order_book_samples_per_product=self._max_order_book_samples_per_product,
+        )
         return StrategySnapshot(
             as_of_sequence=projection.last_sequence,
             evaluated_at=self._clock.now(),

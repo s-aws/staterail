@@ -127,6 +127,9 @@ _KNOWN_ENV_SUFFIXES = frozenset(
         "STRATEGIES_ENABLED",
         "STRATEGIES_INTERVAL_SECONDS",
         "STRATEGIES_MARKET_DATA_REQUIREMENTS",
+        "STRATEGIES_MAX_MARKET_TRADES_PER_PRODUCT",
+        "STRATEGIES_MAX_ORDER_BOOK_SAMPLE_DEPTH_PER_SIDE",
+        "STRATEGIES_MAX_ORDER_BOOK_SAMPLES_PER_PRODUCT",
         "STRATEGIES_OPERATOR_POLICY_FILE",
         "STRATEGIES_PARAMETERS",
         "STRATEGIES_RUN_ON_START",
@@ -187,6 +190,9 @@ _STRATEGIES_FIELDS = _SCHEDULE_FIELDS | frozenset(
     {
         "allow_live_execution",
         "market_data_requirements",
+        "max_market_trades_per_product",
+        "max_order_book_sample_depth_per_side",
+        "max_order_book_samples_per_product",
         "operator_policy",
         "operator_policy_file",
         "strategy_parameters",
@@ -569,6 +575,30 @@ def _strategies_config(raw: Mapping[str, Any]) -> StrategyRuntimeConfig:
                 "bot.strategies.market_data_requirements",
             )
         ),
+        max_market_trades_per_product=(
+            None
+            if raw.get("max_market_trades_per_product") is None
+            else _positive_int(
+                raw.get("max_market_trades_per_product"),
+                "bot.strategies.max_market_trades_per_product",
+            )
+        ),
+        max_order_book_sample_depth_per_side=(
+            None
+            if raw.get("max_order_book_sample_depth_per_side") is None
+            else _positive_int(
+                raw.get("max_order_book_sample_depth_per_side"),
+                "bot.strategies.max_order_book_sample_depth_per_side",
+            )
+        ),
+        max_order_book_samples_per_product=(
+            1
+            if raw.get("max_order_book_samples_per_product") is None
+            else _positive_int(
+                raw.get("max_order_book_samples_per_product"),
+                "bot.strategies.max_order_book_samples_per_product",
+            )
+        ),
         operator_policy=_operator_policy_config(raw),
         strategy_parameters=_strategy_parameters_config(
             raw.get("strategy_parameters", {}),
@@ -898,6 +928,21 @@ def _env_to_raw(environment: Mapping[str, str], *, prefix: str) -> dict[str, Any
         environment.get(f"{prefix}STRATEGIES_ALLOW_LIVE_EXECUTION"),
     )
     _set_csv_if_present(strategies, "strategy_ids", environment.get(f"{prefix}STRATEGY_IDS"))
+    _set_if_present(
+        strategies,
+        "max_market_trades_per_product",
+        environment.get(f"{prefix}STRATEGIES_MAX_MARKET_TRADES_PER_PRODUCT"),
+    )
+    _set_if_present(
+        strategies,
+        "max_order_book_sample_depth_per_side",
+        environment.get(f"{prefix}STRATEGIES_MAX_ORDER_BOOK_SAMPLE_DEPTH_PER_SIDE"),
+    )
+    _set_if_present(
+        strategies,
+        "max_order_book_samples_per_product",
+        environment.get(f"{prefix}STRATEGIES_MAX_ORDER_BOOK_SAMPLES_PER_PRODUCT"),
+    )
     _set_if_present(
         strategies,
         "operator_policy_file",

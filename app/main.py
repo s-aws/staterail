@@ -47,6 +47,10 @@ from app.operator_actions import (
     operator_open_orders_payload,
     operator_place_order_payload,
 )
+from app.operator_canary import (
+    operator_canary_plan_payload,
+    render_operator_canary_dry_run_config,
+)
 from app.strategy_scenario import strategy_scenario_payload
 from app.strategy_simulation_gate import (
     record_strategy_simulation_result,
@@ -271,6 +275,40 @@ def parse_args() -> argparse.Namespace:
         help="Optional product filter for --operator-open-orders.",
     )
     parser.add_argument(
+        "--operator-canary-plan",
+        action="store_true",
+        help=(
+            "Print a read-only controlled canary command plan using the existing "
+            "operator place, inspect, cancel, replay, and health commands."
+        ),
+    )
+    parser.add_argument(
+        "--operator-canary-dry-run-config-file",
+        default=None,
+        help=(
+            "Dry-run config file used by --operator-canary-plan before the live "
+            "config from --config-file is used."
+        ),
+    )
+    parser.add_argument(
+        "--operator-canary-render-dry-run-config",
+        action="store_true",
+        help=(
+            "Render an isolated dry-run canary config from --config-file without "
+            "starting runtime tasks, writing the ledger, or calling order endpoints."
+        ),
+    )
+    parser.add_argument(
+        "--operator-canary-dry-run-ledger-path",
+        default=None,
+        help="Dry-run ledger path to write into the rendered canary config.",
+    )
+    parser.add_argument(
+        "--operator-canary-dry-run-config-force",
+        action="store_true",
+        help="Overwrite the target --operator-canary-dry-run-config-file when rendering.",
+    )
+    parser.add_argument(
         "--operator-place-order",
         action="store_true",
         help=(
@@ -401,7 +439,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--operator-id",
         default=None,
-        help="Operator identifier required by operator write commands.",
+        help="Operator identifier required by operator write commands and canary planning.",
     )
     parser.add_argument(
         "--product-catalog-smoke",
@@ -592,6 +630,8 @@ async def run_from_args(
     operator_policy_scenarios_file = getattr(args, "operator_policy_scenarios_file", None)
     operator_cancel_all_open_orders_requested = getattr(args, "operator_cancel_all_open_orders", False)
     operator_cancel_order_requested = getattr(args, "operator_cancel_order", False)
+    operator_canary_plan_requested = getattr(args, "operator_canary_plan", False)
+    operator_canary_render_requested = getattr(args, "operator_canary_render_dry_run_config", False)
     operator_place_order_requested = getattr(args, "operator_place_order", False)
     strategy_scenario_file = getattr(args, "strategy_scenario_file", None)
     strategy_scenario_requested = strategy_scenario_file is not None
@@ -620,6 +660,42 @@ async def run_from_args(
         raise ValueError("--operator-cancel-order and --operator-cancel-all-open-orders cannot be combined")
     if operator_place_order_requested and (operator_cancel_order_requested or operator_cancel_all_open_orders_requested):
         raise ValueError("--operator-place-order cannot be combined with operator cancel commands")
+    if operator_canary_render_requested:
+        if not getattr(args, "config_file", None):
+            raise ValueError("--config-file is required with --operator-canary-render-dry-run-config")
+        if not getattr(args, "operator_canary_dry_run_config_file", None):
+            raise ValueError(
+                "--operator-canary-dry-run-config-file is required with --operator-canary-render-dry-run-config"
+            )
+        if not getattr(args, "operator_canary_dry_run_ledger_path", None):
+            raise ValueError(
+                "--operator-canary-dry-run-ledger-path is required with --operator-canary-render-dry-run-config"
+            )
+        if (
+            operator_canary_plan_requested
+            or operator_place_order_requested
+            or operator_cancel_order_requested
+            or operator_cancel_all_open_orders_requested
+            or getattr(args, "operator_open_orders", False)
+        ):
+            raise ValueError(
+                "--operator-canary-render-dry-run-config cannot be combined with operator plan, "
+                "place, cancel, or open-order commands"
+            )
+    if operator_canary_plan_requested:
+        if not getattr(args, "config_file", None):
+            raise ValueError("--config-file is required with --operator-canary-plan")
+        if not getattr(args, "operator_canary_dry_run_config_file", None):
+            raise ValueError("--operator-canary-dry-run-config-file is required with --operator-canary-plan")
+        if not getattr(args, "operator_id", None):
+            raise ValueError("--operator-id is required with --operator-canary-plan")
+        _require_cli_value(args, "operator_place_product_id", "--operator-place-product-id")
+        _require_cli_value(args, "operator_place_side", "--operator-place-side")
+        _require_cli_value(args, "operator_place_size", "--operator-place-size")
+        _require_cli_value(args, "operator_place_limit_price", "--operator-place-limit-price")
+        _require_cli_value(args, "operator_place_order_type", "--operator-place-order-type")
+        _require_cli_value(args, "operator_place_time_in_force", "--operator-place-time-in-force")
+        _require_cli_value(args, "operator_place_reason", "--operator-place-reason")
     operator_write_requested = (
         operator_place_order_requested
         or operator_cancel_order_requested
@@ -662,6 +738,7 @@ async def run_from_args(
         "--ledger-export": getattr(args, "ledger_export", False),
         "--ledger-health": getattr(args, "ledger_health", False),
         "--ledger-summary": getattr(args, "ledger_summary", False),
+        "--operator-canary-plan": operator_canary_plan_requested,
         "--operator-open-orders": getattr(args, "operator_open_orders", False),
         "--live-runtime-gate": getattr(args, "live_runtime_gate", False),
         "--operator-policy-scenarios-file": operator_policy_scenarios_file is not None,
@@ -683,6 +760,24 @@ async def run_from_args(
     ):
         raise ValueError(
             f"{enabled_read_only_commands[0]} cannot be combined with acknowledgement, checkpoint, anchor, or archive commands"
+        )
+    if operator_canary_render_requested and (
+        enabled_read_only_commands
+        or strategy_scenario_requested
+        or getattr(args, "ledger_checkpoint", False)
+        or ledger_health_acknowledge_requested
+        or anchor_latest_checkpoint_requested
+        or anchor_requested
+        or archive_requested
+        or product_catalog_smoke_requested
+        or feed_smoke_requested
+        or exchange_state_smoke_requested
+        or live_no_order_preflight_requested
+        or getattr(args, "strategy_simulate", False)
+    ):
+        raise ValueError(
+            "--operator-canary-render-dry-run-config cannot be combined with runtime, read-only, "
+            "smoke, preflight, scenario, checkpoint, acknowledgement, anchor, or archive commands"
         )
     if strategy_scenario_requested and (
         enabled_read_only_commands
@@ -838,6 +933,16 @@ async def run_from_args(
             ok_status=ReadinessStatus.OK.value,
         )
 
+    if operator_canary_render_requested:
+        payload = render_operator_canary_dry_run_config(
+            force=getattr(args, "operator_canary_dry_run_config_force", False),
+            ledger_path=Path(getattr(args, "operator_canary_dry_run_ledger_path")),
+            source_config_file=Path(getattr(args, "config_file")),
+            target_config_file=Path(getattr(args, "operator_canary_dry_run_config_file")),
+        )
+        print(json.dumps(payload, indent=2, sort_keys=True))
+        return 0
+
     if getattr(args, "ledger_export", False):
         print(json.dumps(ledger_export_payload(config.ledger_path), indent=2, sort_keys=True))
         return 0
@@ -887,6 +992,55 @@ async def run_from_args(
     if getattr(args, "source_of_truth", False):
         print(json.dumps(source_of_truth_payload(config.ledger_path), indent=2, sort_keys=True))
         return 0
+
+    if operator_canary_plan_requested:
+        dry_run_config = load_coinbase_application_config_from_json_file(
+            Path(getattr(args, "operator_canary_dry_run_config_file"))
+        )
+        payload = operator_canary_plan_payload(
+            config,
+            dry_run_config,
+            dry_run_config_file=getattr(args, "operator_canary_dry_run_config_file"),
+            leverage=getattr(args, "operator_place_leverage", None),
+            limit_price=getattr(args, "operator_place_limit_price"),
+            live_config_file=getattr(args, "config_file"),
+            margin_type=(
+                _enum_value(
+                    MarginType,
+                    getattr(args, "operator_place_margin_type"),
+                    "--operator-place-margin-type",
+                )
+                if getattr(args, "operator_place_margin_type", None) is not None
+                else None
+            ),
+            operator_id=getattr(args, "operator_id"),
+            order_type=_enum_value(
+                OrderType,
+                getattr(args, "operator_place_order_type"),
+                "--operator-place-order-type",
+            ),
+            post_only=getattr(args, "operator_place_post_only", False),
+            product_id=getattr(args, "operator_place_product_id"),
+            reason=getattr(args, "operator_place_reason"),
+            reduce_only=getattr(args, "operator_place_reduce_only", False),
+            side=_enum_value(
+                OrderSide,
+                getattr(args, "operator_place_side"),
+                "--operator-place-side",
+            ),
+            size=getattr(args, "operator_place_size"),
+            time_in_force=_enum_value(
+                TimeInForce,
+                getattr(args, "operator_place_time_in_force"),
+                "--operator-place-time-in-force",
+            ),
+        )
+        print(json.dumps(payload, indent=2, sort_keys=True))
+        return _report_exit_code(
+            payload,
+            fail_on_attention=True,
+            ok_status=ReadinessStatus.OK.value,
+        )
 
     if getattr(args, "operator_open_orders", False):
         payload = operator_open_orders_payload(
