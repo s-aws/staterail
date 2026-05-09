@@ -1220,6 +1220,7 @@ class StrategyEvaluationTask:
         max_market_trades_per_product: int | None = None,
         max_order_book_sample_depth_per_side: int | None = None,
         max_order_book_samples_per_product: int = 1,
+        order_book_sample_product_ids: tuple[str, ...] = (),
         clock: Clock | None = None,
         operator_policy: OperatorPolicy | None = None,
         product_catalog: ProductCatalog | None = None,
@@ -1264,6 +1265,11 @@ class StrategyEvaluationTask:
             raise TypeError("max_order_book_samples_per_product must be an integer")
         if max_order_book_samples_per_product <= 0:
             raise ValueError("max_order_book_samples_per_product must be positive")
+        for product_id in order_book_sample_product_ids:
+            if not isinstance(product_id, str) or not product_id:
+                raise TypeError("order_book_sample_product_ids must contain non-empty strings")
+        if len(order_book_sample_product_ids) != len(set(order_book_sample_product_ids)):
+            raise ValueError("order_book_sample_product_ids must be unique")
         self._core = core
         self._action_gateway = action_gateway
         self._executor = executor
@@ -1272,6 +1278,7 @@ class StrategyEvaluationTask:
         self._max_market_trades_per_product = max_market_trades_per_product
         self._max_order_book_sample_depth_per_side = max_order_book_sample_depth_per_side
         self._max_order_book_samples_per_product = max_order_book_samples_per_product
+        self._order_book_sample_product_ids = order_book_sample_product_ids
         self._operator_policy = _operator_policy_or_none(operator_policy)
         self._strategies = _validated_strategies(strategies)
         self._clock = clock or SystemClock()
@@ -1313,6 +1320,7 @@ class StrategyEvaluationTask:
                     self._max_order_book_sample_depth_per_side
                 ),
                 "max_order_book_samples_per_product": self._max_order_book_samples_per_product,
+                "order_book_sample_product_ids": list(self._order_book_sample_product_ids),
                 "strategy_id": strategy_id,
                 "strategy_index": strategy_index,
             },
@@ -1451,6 +1459,7 @@ class StrategyEvaluationTask:
             max_market_trades_per_product=self._max_market_trades_per_product,
             max_order_book_sample_depth_per_side=self._max_order_book_sample_depth_per_side,
             max_order_book_samples_per_product=self._max_order_book_samples_per_product,
+            order_book_sample_product_ids=self._order_book_sample_product_ids,
         )
         return StrategySnapshot(
             as_of_sequence=projection.last_sequence,

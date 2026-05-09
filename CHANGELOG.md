@@ -6,6 +6,27 @@ This changelog starts with the first public StateRail release.
 
 ## Unreleased
 
+No unreleased changes.
+
+## 0.1.5 - 2026-05-09
+
+### Added
+
+- Added a read-only operator canary evidence command that summarizes the replayed place/cancel lifecycle, cancellation evidence, and remaining open orders after a live canary.
+- Added compact canary evidence to the generated canary plan and operator runbooks.
+- Added a no-intent `market_window_stats` strategy-wizard template that demonstrates replayed trade-window and order-book-window helper access.
+- Added `bot.strategies.order_book_sample_product_ids` to scope historical order-book sample retention without losing latest order-book state for other products.
+- Added explicit venue capability flags for Coinbase product metadata, websocket market data, user-order streams, order/fill/account lookups, and CFM position lookups.
+
+### Changed
+
+- Tightened CFM live example risk caps to a $200 max order notional for the current Coinbase operator test posture.
+- Added `bot.risk.max_daily_notional` and `bot.risk.max_open_orders` config/env loading so baseline risk policy can enforce daily notional and open-order caps without requiring an operator-policy overlay.
+
+### Fixed
+
+- Canary planning now validates proposed live canary price, size, and notional against replayed product metadata when the live ledger has product snapshots, preventing placeholder prices from producing unsafe live command plans.
+
 ## 0.1.4 - 2026-05-09
 
 ### Added

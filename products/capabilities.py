@@ -23,9 +23,16 @@ class VenueCapabilities:
     status: StrategyHelperStatus
     product_venues: tuple[ProductVenue, ...] = ()
     supports_live_execution: bool = False
+    supports_product_metadata_lookup: bool = False
+    supports_market_data_websocket: bool = False
+    supports_user_order_websocket: bool = False
     supports_place_orders: bool = False
     supports_cancel_orders: bool = False
     supports_amend: bool = False
+    supports_order_lookup: bool = False
+    supports_fill_lookup: bool = False
+    supports_account_lookup: bool = False
+    supports_position_lookup: bool = False
     supports_post_only: bool = False
     supports_reduce_only: bool = False
     supports_market_orders: bool = False
@@ -62,12 +69,19 @@ class VenueCapabilities:
                 "supported_time_in_force": [time_in_force.value for time_in_force in self.supported_time_in_force],
                 "supports_amend": self.supports_amend,
                 "supports_attached_orders": self.supports_attached_orders,
+                "supports_account_lookup": self.supports_account_lookup,
                 "supports_cancel_orders": self.supports_cancel_orders,
+                "supports_fill_lookup": self.supports_fill_lookup,
                 "supports_live_execution": self.supports_live_execution,
                 "supports_market_orders": self.supports_market_orders,
+                "supports_market_data_websocket": self.supports_market_data_websocket,
+                "supports_order_lookup": self.supports_order_lookup,
                 "supports_place_orders": self.supports_place_orders,
+                "supports_position_lookup": self.supports_position_lookup,
                 "supports_post_only": self.supports_post_only,
+                "supports_product_metadata_lookup": self.supports_product_metadata_lookup,
                 "supports_reduce_only": self.supports_reduce_only,
+                "supports_user_order_websocket": self.supports_user_order_websocket,
                 "venue": self.venue.value,
             },
             "venue capabilities payload",
@@ -166,6 +180,7 @@ def venue_capabilities(venue: ProductVenue | OperatorPolicyVenue | str) -> Venue
             ),
             product_venues=(ProductVenue.INTX,),
             status=StrategyHelperStatus.OK,
+            supports_product_metadata_lookup=True,
             venue=ProductVenue.INTX,
         )
     return VenueCapabilities(
@@ -256,10 +271,17 @@ def _coinbase_supported_capabilities(venue: ProductVenue) -> VenueCapabilities:
             TimeInForce.FILL_OR_KILL,
         ),
         supports_cancel_orders=True,
+        supports_account_lookup=True,
+        supports_fill_lookup=True,
         supports_live_execution=True,
         supports_market_orders=True,
+        supports_market_data_websocket=True,
+        supports_order_lookup=True,
         supports_place_orders=True,
+        supports_position_lookup=venue == ProductVenue.FCM,
         supports_post_only=True,
+        supports_product_metadata_lookup=True,
+        supports_user_order_websocket=True,
         venue=venue,
     )
 

@@ -510,6 +510,7 @@ class SourceOfTruthProjection:
         max_market_trades_per_product: int | None = None,
         max_order_book_sample_depth_per_side: int | None = None,
         max_order_book_samples_per_product: int = 1,
+        order_book_sample_product_ids: tuple[str, ...] = (),
     ) -> None:
         _validate_optional_positive_int(
             max_market_trades_per_product,
@@ -522,6 +523,10 @@ class SourceOfTruthProjection:
         _validate_positive_int(
             max_order_book_samples_per_product,
             "max_order_book_samples_per_product",
+        )
+        _validate_string_scope(
+            order_book_sample_product_ids,
+            "order_book_sample_product_ids",
         )
         self.actions: dict[str, ActionSnapshot] = {}
         self.audit_anchors: list[LedgerAnchorSnapshot] = []
@@ -538,8 +543,10 @@ class SourceOfTruthProjection:
         self.order_books_by_product_id: dict[str, MarketOrderBookSnapshot] = {}
         self.order_book_samples_by_product_id: dict[str, list[MarketOrderBookSnapshot]] = {}
         self.order_book_sample_retention_dropped_by_product_id: dict[str, int] = {}
+        self.order_book_sample_scope_skipped_by_product_id: dict[str, int] = {}
         self.max_order_book_sample_depth_per_side = max_order_book_sample_depth_per_side
         self.max_order_book_samples_per_product = max_order_book_samples_per_product
+        self.order_book_sample_product_ids = order_book_sample_product_ids
         self.market_trades_by_id: dict[str, MarketTradeSnapshot] = {}
         self.market_trade_ids_by_product_id: dict[str, list[str]] = {}
         self.market_trade_retention_dropped_by_product_id: dict[str, int] = {}
@@ -589,11 +596,13 @@ class SourceOfTruthProjection:
         max_market_trades_per_product: int | None = None,
         max_order_book_sample_depth_per_side: int | None = None,
         max_order_book_samples_per_product: int = 1,
+        order_book_sample_product_ids: tuple[str, ...] = (),
     ) -> "SourceOfTruthProjection":
         projection = cls(
             max_market_trades_per_product=max_market_trades_per_product,
             max_order_book_sample_depth_per_side=max_order_book_sample_depth_per_side,
             max_order_book_samples_per_product=max_order_book_samples_per_product,
+            order_book_sample_product_ids=order_book_sample_product_ids,
         )
         for record in ledger.iter_records():
             projection.apply(record)
@@ -607,11 +616,13 @@ class SourceOfTruthProjection:
         max_market_trades_per_product: int | None = None,
         max_order_book_sample_depth_per_side: int | None = None,
         max_order_book_samples_per_product: int = 1,
+        order_book_sample_product_ids: tuple[str, ...] = (),
     ) -> "SourceOfTruthProjection":
         projection = cls(
             max_market_trades_per_product=max_market_trades_per_product,
             max_order_book_sample_depth_per_side=max_order_book_sample_depth_per_side,
             max_order_book_samples_per_product=max_order_book_samples_per_product,
+            order_book_sample_product_ids=order_book_sample_product_ids,
         )
         for record in records:
             projection.apply(record)
@@ -783,6 +794,10 @@ class SourceOfTruthProjection:
     def order_book_sample_retention_dropped_count(self) -> int:
         return sum(self.order_book_sample_retention_dropped_by_product_id.values())
 
+    @property
+    def order_book_sample_scope_skipped_count(self) -> int:
+        return sum(self.order_book_sample_scope_skipped_by_product_id.values())
+
     def latest_ticker(self, product_id: str) -> MarketTickerSnapshot | None:
         return self.latest_tickers_by_product_id.get(product_id)
 
@@ -912,6 +927,9 @@ class SourceOfTruthProjection:
                 "dropped_count": self.order_book_sample_retention_dropped_count,
                 "max_order_book_sample_depth_per_side": self.max_order_book_sample_depth_per_side,
                 "max_order_book_samples_per_product": self.max_order_book_samples_per_product,
+                "order_book_sample_product_ids": list(self.order_book_sample_product_ids),
+                "scope_skipped_by_product_id": self.order_book_sample_scope_skipped_by_product_id,
+                "scope_skipped_count": self.order_book_sample_scope_skipped_count,
             },
             "market_order_book_samples_by_product_id": self.order_book_samples_by_product_id,
             "market_tickers": self.latest_tickers_by_product_id,
@@ -1969,6 +1987,14 @@ class SourceOfTruthProjection:
         product_id: str,
         book: MarketOrderBookSnapshot,
     ) -> None:
+        if (
+            self.order_book_sample_product_ids
+            and product_id not in self.order_book_sample_product_ids
+        ):
+            self.order_book_sample_scope_skipped_by_product_id[product_id] = (
+                self.order_book_sample_scope_skipped_by_product_id.get(product_id, 0) + 1
+            )
+            return
         samples = self.order_book_samples_by_product_id.setdefault(product_id, [])
         samples.append(
             _copy_order_book_snapshot(
@@ -2700,6 +2726,16 @@ def _validate_positive_int(value: int, field_name: str) -> None:
         raise TypeError(f"{field_name} must be an integer when provided")
     if value <= 0:
         raise ValueError(f"{field_name} must be positive")
+
+
+def _validate_string_scope(value: tuple[str, ...], field_name: str) -> None:
+    if not isinstance(value, tuple):
+        raise TypeError(f"{field_name} must be a tuple")
+    for item in value:
+        if not isinstance(item, str) or not item:
+            raise TypeError(f"{field_name} must contain non-empty strings")
+    if len(value) != len(set(value)):
+        raise ValueError(f"{field_name} must be unique")
 
 
 def _float_or_none(value: Any) -> float | None:

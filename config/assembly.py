@@ -449,6 +449,7 @@ class StrategyRuntimeConfig:
     max_market_trades_per_product: int | None = None
     max_order_book_sample_depth_per_side: int | None = None
     max_order_book_samples_per_product: int = 1
+    order_book_sample_product_ids: tuple[str, ...] = ()
     allow_live_execution: bool = False
     operator_policy: OperatorPolicy | None = None
 
@@ -507,6 +508,11 @@ class StrategyRuntimeConfig:
             raise TypeError("max_order_book_samples_per_product must be an integer")
         if self.max_order_book_samples_per_product <= 0:
             raise ValueError("max_order_book_samples_per_product must be positive")
+        for product_id in self.order_book_sample_product_ids:
+            if not isinstance(product_id, str) or not product_id:
+                raise TypeError("order_book_sample_product_ids must contain non-empty strings")
+        if len(self.order_book_sample_product_ids) != len(set(self.order_book_sample_product_ids)):
+            raise ValueError("order_book_sample_product_ids must be unique")
         if not isinstance(self.allow_live_execution, bool):
             raise TypeError("allow_live_execution must be a bool")
         if self.operator_policy is not None and not isinstance(self.operator_policy, OperatorPolicy):
@@ -943,6 +949,7 @@ def assemble_coinbase_runtime(
                 config.strategies.max_order_book_sample_depth_per_side
             ),
             max_order_book_samples_per_product=config.strategies.max_order_book_samples_per_product,
+            order_book_sample_product_ids=config.strategies.order_book_sample_product_ids,
             operator_policy=config.strategies.operator_policy,
             product_catalog=resolved_product_catalog,
             strategies=selected_strategies,

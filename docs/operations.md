@@ -85,7 +85,7 @@ python -m pip install -e ..\my-strategy
 python -m pytest ..\my-strategy\tests -v
 ```
 
-The wizard creates package metadata, a `staterail.strategies` entry point, a safe no-intent strategy template, a dry-run config, a scenario fixture, and package-local tests. It is scaffolding only; add trading behavior after scenario and simulation evidence exist.
+The wizard creates package metadata, a `staterail.strategies` entry point, a safe no-intent strategy template, a dry-run config, a scenario fixture, and package-local tests. Use `--template current_market_data` for current projection access or `--template market_window_stats` for replayed trade-window and order-book-window examples. It is scaffolding only; add trading behavior after scenario and simulation evidence exist.
 
 Run checked operator-policy examples without writing to the ledger:
 
@@ -302,10 +302,10 @@ Use the canary planner before the first live order. First render an isolated dry
 python -m app.main --config-file config.local.json --operator-canary-render-dry-run-config --operator-canary-dry-run-config-file config.canary-dry-run.local.json --operator-canary-dry-run-ledger-path data/canary-dry-run-audit.local.jsonl --operator-canary-dry-run-config-force
 ```
 
-The canary planner is read-only: it loads one dry-run config and one live config, checks the canary shape and configured risk scope, and prints the exact command sequence for dry-run placement, dry-run cleanup, live preflight, live placement, live inspection, live cancel, source-of-truth replay, and ledger health. It does not write the ledger, start runtime tasks, start websocket feeds, or call order endpoints.
+The canary planner is read-only: it loads one dry-run config and one live config, checks the canary shape and configured risk scope, and prints the exact command sequence for dry-run placement, dry-run cleanup, live preflight, live placement, live inspection, live cancel, compact canary evidence, source-of-truth replay, and ledger health. It does not write the ledger, start runtime tasks, start websocket feeds, or call order endpoints. When the live ledger already contains product snapshots, it also validates the proposed canary price, size, and notional against replayed product metadata. If the ledger has no product snapshot for the canary product yet, run the aggregate no-order preflight once, then regenerate the plan.
 
 ```powershell
-python -m app.main --config-file config.local.json --operator-canary-plan --operator-canary-dry-run-config-file config.canary-dry-run.local.json --operator-id "$env:USERNAME" --operator-place-product-id "SHB-26JUN26-CDE" --operator-place-side buy --operator-place-size "1" --operator-place-limit-price "100" --operator-place-leverage "1" --operator-place-order-type limit --operator-place-time-in-force good_until_cancelled --operator-place-post-only --operator-place-reason "Operator canary"
+python -m app.main --config-file config.local.json --operator-canary-plan --operator-canary-dry-run-config-file config.canary-dry-run.local.json --operator-id "$env:USERNAME" --operator-place-product-id "SHB-26JUN26-CDE" --operator-place-side buy --operator-place-size "1" --operator-place-limit-price "<product-aware-limit-price>" --operator-place-leverage "1" --operator-place-order-type limit --operator-place-time-in-force good_until_cancelled --operator-place-post-only --operator-place-reason "Operator canary"
 ```
 
 The live config supplied through `--config-file` must use live REST execution mode. The dry-run config supplied through `--operator-canary-dry-run-config-file` must use dry-run REST execution mode and should write to a separate dry-run ledger. Stop if the planner returns `attention_required`.
@@ -315,7 +315,7 @@ Use the one-shot operator place-order command for the actual canary order after 
 Run the command in dry-run mode first:
 
 ```powershell
-python -m app.main --config-file config.canary-dry-run.local.json --operator-place-order --operator-id "$env:USERNAME" --operator-place-product-id "SHB-26JUN26-CDE" --operator-place-side buy --operator-place-size "1" --operator-place-limit-price "100" --operator-place-leverage "1" --operator-place-order-type limit --operator-place-time-in-force good_until_cancelled --operator-place-post-only --operator-place-reason "Operator dry-run canary"
+python -m app.main --config-file config.canary-dry-run.local.json --operator-place-order --operator-id "$env:USERNAME" --operator-place-product-id "SHB-26JUN26-CDE" --operator-place-side buy --operator-place-size "1" --operator-place-limit-price "<product-aware-limit-price>" --operator-place-leverage "1" --operator-place-order-type limit --operator-place-time-in-force good_until_cancelled --operator-place-post-only --operator-place-reason "Operator dry-run canary"
 ```
 
 The JSON response includes `receipt`, `logical_order_id`, `client_order_id`, `exchange_order_id` when available, and `status`. A non-`ok` status means the gateway, risk gate, or executor rejected or failed the action and the operator should stop before live placement.
@@ -324,10 +324,16 @@ For live Coinbase use, run the same command only after readiness, no-order prefl
 
 ```powershell
 $env:STATERAIL_ALLOW_LIVE_TRADING = "true"
-python -m app.main --config-file config.local.json --operator-place-order --operator-id "$env:USERNAME" --operator-place-product-id "SHB-26JUN26-CDE" --operator-place-side buy --operator-place-size "1" --operator-place-limit-price "100" --operator-place-leverage "1" --operator-place-order-type limit --operator-place-time-in-force good_until_cancelled --operator-place-post-only --operator-place-reason "Operator live canary"
+python -m app.main --config-file config.local.json --operator-place-order --operator-id "$env:USERNAME" --operator-place-product-id "SHB-26JUN26-CDE" --operator-place-side buy --operator-place-size "1" --operator-place-limit-price "<product-aware-limit-price>" --operator-place-leverage "1" --operator-place-order-type limit --operator-place-time-in-force good_until_cancelled --operator-place-post-only --operator-place-reason "Operator live canary"
 ```
 
-Use a product allowed by the local risk policy and avoid BTC futures/perpetual products for the initial Coinbase operator test scope. After a live canary, immediately inspect tracked open orders, cancel the canary if it remains open, replay the ledger, and run ledger health.
+Use a product allowed by the local risk policy and avoid BTC futures/perpetual products for the initial Coinbase operator test scope. After a live canary, immediately inspect tracked open orders, cancel the canary if it remains open, replay compact canary evidence, replay the full source-of-truth projection when needed, and run ledger health.
+
+```powershell
+python -m app.main --config-file config.local.json --operator-canary-evidence --operator-canary-evidence-exchange-order-id "REPLACE_WITH_EXCHANGE_ORDER_ID" --operator-canary-evidence-product-id "SHB-26JUN26-CDE" --operator-canary-evidence-fail-on-attention
+```
+
+The evidence command is read-only. It verifies the ledger, finds the matching place-order lifecycle, reports the place action, cancel actions, order identifiers, lifecycle status, and remaining open orders for the product. It returns attention when the order is still open, filled, missing cancellation evidence, or any open order remains for the same product.
 
 ## Audited Operator Cancel
 

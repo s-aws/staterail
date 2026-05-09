@@ -28,9 +28,11 @@ The first live canary order for an operator account should start with the read-o
 - refuses market orders
 - refuses BTC futures/perpetual products for the initial Coinbase operator test scope
 - prints the audited action receipt and venue order identifiers
-- is immediately followed by operator open-order inspection, cancel, exchange-state smoke, replay, and ledger health
+- is immediately followed by operator open-order inspection, cancel, compact canary evidence, exchange-state smoke, replay, and ledger health
 
 The canary plan plus operator place-order command is the only recommended first live canary path. Do not substitute a scheduled strategy run for this step.
+
+When the live ledger already contains product snapshots, the canary planner validates the proposed canary price, size, and notional against replayed product metadata and the configured risk cap. If the ledger does not yet contain product metadata for the canary product, run the live no-order preflight first, then generate the canary plan again. The generated plan still includes a no-order preflight step as the final confirmation before live placement.
 
 ## Operator Progression
 
@@ -50,7 +52,8 @@ Use this order when bringing a real account online:
 12. Run the planned dry-run operator place-order and dry-run cleanup.
 13. Run the planned live preflight/gate sequence.
 14. Place one tiny post-only live canary order.
-15. Cancel immediately and verify final ledger health.
+15. Cancel immediately.
+16. Verify compact canary evidence, exchange-state smoke, source-of-truth replay, and final ledger health.
 
 Any attention result stops the progression until reviewed.
 
@@ -69,5 +72,6 @@ python -m app.main --config-file config.canary-dry-run.local.json --operator-pla
 python -m app.main --config-file config.canary-dry-run.local.json --operator-cancel-all-open-orders --operator-id "$env:USERNAME" --operator-cancel-product-id "<product-id>" --operator-cancel-action-id-prefix "operator-canary-dry-run-cancel" --operator-cancel-reason "first operator canary dry-run cleanup"
 python -m app.main --config-file config.local.json --operator-open-orders
 python -m app.main --config-file config.local.json --operator-cancel-order --operator-id "$env:USERNAME" --operator-cancel-exchange-order-id "<exchange-order-id>" --operator-cancel-reason "operator cleanup"
+python -m app.main --config-file config.local.json --operator-canary-evidence --operator-canary-evidence-exchange-order-id "<exchange-order-id>" --operator-canary-evidence-product-id "<product-id>" --operator-canary-evidence-fail-on-attention
 python -m app.main --config-file config.local.json --operator-cancel-all-open-orders --operator-id "$env:USERNAME" --operator-cancel-product-id "<product-id>" --operator-cancel-action-id-prefix "operator-cancel" --operator-cancel-reason "operator cleanup"
 ```

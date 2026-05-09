@@ -267,6 +267,7 @@ class ConfigWizardProfile(StringEnum):
 class StrategyWizardTemplate(StringEnum):
     CUSTOM = "custom"
     CURRENT_MARKET_DATA = "current_market_data"
+    MARKET_WINDOW_STATS = "market_window_stats"
     METADATA_ONLY = "metadata_only"
     NOOP = "noop"
 
@@ -522,13 +523,32 @@ class OperatorCanaryPlanIssue(StringEnum):
     LIVE_CONFIG_NOT_LIVE = "live_config_not_live"
     NON_POSITIVE_LIMIT_PRICE = "non_positive_limit_price"
     NON_POSITIVE_SIZE = "non_positive_size"
+    NOTIONAL_ABOVE_RISK_LIMIT = "notional_above_risk_limit"
     ORDER_TYPE_OUTSIDE_RISK_SCOPE = "order_type_outside_risk_scope"
+    PRICE_INCREMENT_INVALID = "price_increment_invalid"
+    PRODUCT_METADATA_MISSING = "product_metadata_missing"
+    PRODUCT_NOTIONAL_INVALID = "product_notional_invalid"
     PRODUCT_OUTSIDE_RISK_SCOPE = "product_outside_risk_scope"
     REDUCE_ONLY_REQUIRED = "reduce_only_required"
     SIDE_OUTSIDE_RISK_SCOPE = "side_outside_risk_scope"
+    SIZE_INCREMENT_INVALID = "size_increment_invalid"
     TIME_IN_FORCE_OUTSIDE_RISK_SCOPE = "time_in_force_outside_risk_scope"
     UNSUPPORTED_ORDER_TYPE = "unsupported_order_type"
     UNSUPPORTED_POST_ONLY = "unsupported_post_only"
+
+
+class OperatorCanaryEvidenceIssue(StringEnum):
+    CANCEL_ACTION_MISSING = "cancel_action_missing"
+    CANCEL_ACTION_NOT_EXECUTED = "cancel_action_not_executed"
+    IDENTIFIER_MISMATCH = "identifier_mismatch"
+    NO_MATCHING_ORDER = "no_matching_order"
+    OPEN_ORDERS_REMAIN_FOR_PRODUCT = "open_orders_remain_for_product"
+    ORDER_FILLED = "order_filled"
+    ORDER_NOT_CANCELLED = "order_not_cancelled"
+    ORDER_STILL_OPEN = "order_still_open"
+    PLACE_ACTION_MISSING = "place_action_missing"
+    PLACE_ACTION_NOT_EXECUTED = "place_action_not_executed"
+    PRODUCT_MISMATCH = "product_mismatch"
 
 
 class OperatorCanaryPlanStep(StringEnum):
@@ -537,6 +557,7 @@ class OperatorCanaryPlanStep(StringEnum):
     DRY_RUN_OPEN_ORDERS = "dry_run_open_orders"
     DRY_RUN_PLACE_ORDER = "dry_run_place_order"
     LEDGER_HEALTH = "ledger_health"
+    LIVE_CANARY_EVIDENCE = "live_canary_evidence"
     LIVE_CANCEL_ORDER = "live_cancel_order"
     LIVE_NO_ORDER_PREFLIGHT = "live_no_order_preflight"
     LIVE_OPEN_ORDERS = "live_open_orders"

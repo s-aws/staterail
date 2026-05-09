@@ -105,6 +105,35 @@ def test_strategy_wizard_scaffolds_current_market_data_template(workspace_tmp_pa
     assert completed.returncode == 0, completed.stdout + completed.stderr
 
 
+def test_strategy_wizard_scaffolds_market_window_stats_template(workspace_tmp_path):
+    target = workspace_tmp_path / "window-stats-strategy"
+
+    result = scaffold_strategy_package(
+        force=True,
+        name="window stats strategy",
+        target_path=target,
+        template=StrategyWizardTemplate.MARKET_WINDOW_STATS,
+    )
+    strategy_text = (target / "src" / "window_stats_strategy" / "strategy.py").read_text(encoding="utf-8")
+    env = dict(os.environ)
+    env["PYTHONPATH"] = f"{target / 'src'}{os.pathsep}{Path.cwd()}"
+
+    completed = subprocess.run(
+        [sys.executable, "-m", "pytest", str(target / "tests"), "-v"],
+        capture_output=True,
+        cwd=Path.cwd(),
+        env=env,
+        text=True,
+        check=False,
+    )
+
+    assert result.template == StrategyWizardTemplate.MARKET_WINDOW_STATS
+    assert "market_window_stats(product_id, lookback=lookback)" in strategy_text
+    assert "order_book_window_stats(product_id, lookback=lookback, levels=levels)" in strategy_text
+    assert "PlaceOrderIntent" not in strategy_text
+    assert completed.returncode == 0, completed.stdout + completed.stderr
+
+
 def test_strategy_wizard_interactive_uses_safe_defaults(workspace_tmp_path):
     target = workspace_tmp_path / "interactive-strategy"
     prompts: list[str] = []
@@ -155,6 +184,7 @@ def test_strategy_wizard_cli_lists_templates_as_json(capsys):
     assert [template["template"] for template in payload["templates"]] == [
         StrategyWizardTemplate.CUSTOM.value,
         StrategyWizardTemplate.CURRENT_MARKET_DATA.value,
+        StrategyWizardTemplate.MARKET_WINDOW_STATS.value,
         StrategyWizardTemplate.METADATA_ONLY.value,
         StrategyWizardTemplate.NOOP.value,
     ]

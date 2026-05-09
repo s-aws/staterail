@@ -455,6 +455,9 @@ def test_projection_replaces_order_book_levels_on_new_snapshot(workspace_tmp_pat
         "dropped_count": 0,
         "max_order_book_sample_depth_per_side": None,
         "max_order_book_samples_per_product": 2,
+        "order_book_sample_product_ids": [],
+        "scope_skipped_by_product_id": {},
+        "scope_skipped_count": 0,
     }
 
     with pytest.raises(ValueError, match="max_order_book_samples_per_product must be positive"):
@@ -465,6 +468,72 @@ def test_projection_replaces_order_book_levels_on_new_snapshot(workspace_tmp_pat
         SourceOfTruthProjection(max_order_book_sample_depth_per_side=0)
     with pytest.raises(TypeError, match="max_order_book_sample_depth_per_side must be an integer"):
         SourceOfTruthProjection(max_order_book_sample_depth_per_side=True)
+    with pytest.raises(ValueError, match="order_book_sample_product_ids must be unique"):
+        SourceOfTruthProjection(
+            order_book_sample_product_ids=("BIT-29MAY26-CDE", "BIT-29MAY26-CDE")
+        )
+    with pytest.raises(TypeError, match="order_book_sample_product_ids must contain non-empty strings"):
+        SourceOfTruthProjection(order_book_sample_product_ids=("BIT-29MAY26-CDE", ""))
+
+
+def test_projection_scopes_order_book_sample_retention_without_trimming_latest_books(
+    workspace_tmp_path,
+):
+    ledger = AuditLedger(workspace_tmp_path / "audit.jsonl")
+    core = AuditCore(ledger)
+    router = RedundantFeedRouter(core)
+
+    for sequence, product_id, bid, ask in (
+        (1, "AVA-29MAY26-CDE", "100", "101"),
+        (2, "SHB-26JUN26-CDE", "200", "201"),
+    ):
+        router.ingest(
+            FeedMessage(
+                source_id="coinbase-primary",
+                message_key=f"coinbase:l2_data:{product_id}:{sequence}",
+                event_type=EventType.DATA_RECEIVED,
+                payload={
+                    "channel": "l2_data",
+                    "raw": {
+                        "channel": "l2_data",
+                        "events": [
+                            {
+                                "product_id": product_id,
+                                "type": "snapshot",
+                                "updates": [
+                                    {"new_quantity": "2", "price_level": bid, "side": "bid"},
+                                    {"new_quantity": "3", "price_level": ask, "side": "offer"},
+                                ],
+                            }
+                        ],
+                        "sequence_num": sequence,
+                        "timestamp": "2026-01-01T00:00:00Z",
+                    },
+                    "sequence_num": sequence,
+                    "timestamp": "2026-01-01T00:00:00Z",
+                },
+            )
+        )
+
+    projection = SourceOfTruthProjection.from_ledger(
+        ledger,
+        max_order_book_samples_per_product=5,
+        order_book_sample_product_ids=("AVA-29MAY26-CDE",),
+    )
+    retention = projection.to_payload()["market_order_book_sample_retention"]
+
+    assert projection.order_book("AVA-29MAY26-CDE") is not None
+    assert projection.order_book("SHB-26JUN26-CDE") is not None
+    assert [
+        sample.product_id
+        for sample in projection.order_book_samples_for_product("AVA-29MAY26-CDE")
+    ] == ["AVA-29MAY26-CDE"]
+    assert projection.order_book_samples_for_product("SHB-26JUN26-CDE") == ()
+    assert projection.order_book_sample_scope_skipped_count == 1
+    assert projection.order_book_sample_scope_skipped_by_product_id == {"SHB-26JUN26-CDE": 1}
+    assert retention["order_book_sample_product_ids"] == ["AVA-29MAY26-CDE"]
+    assert retention["scope_skipped_by_product_id"] == {"SHB-26JUN26-CDE": 1}
+    assert retention["scope_skipped_count"] == 1
 
 
 def test_projection_tracks_errors_triggers_and_sequence_anomalies(workspace_tmp_path):

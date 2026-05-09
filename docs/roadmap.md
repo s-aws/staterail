@@ -22,7 +22,7 @@ Use the audited operator command surface as the repeatable first-live-order work
 - Generate a read-only canary plan that checks the dry-run/live configs and prints the exact operator command sequence.
 - Dry-run one explicit post-only limit order through the gateway and risk gate, then clean it up.
 - Run the same command live only after readiness, no-order preflight, simulation qualification when strategies are enabled, and live runtime gate are clean.
-- Immediately inspect open orders, cancel the canary, replay source-of-truth state, run ledger health, and record recovery evidence.
+- Immediately inspect open orders, cancel the canary, replay compact canary evidence, replay source-of-truth state, run ledger health, and record recovery evidence.
 - Keep the canary product scope small and Coinbase spot/CFM-focused until the venue contract has more live evidence.
 
 ### Strategy Helper Surface
@@ -37,11 +37,12 @@ Current strategy helpers expose replay-derived market data retained in the sourc
 - Replay-backed order-book sample windows with configurable per-product sample retention and insufficient-data status when only the latest book is retained.
 - Derived order-book window statistics over retained samples, including spread, midpoint, bid/ask volume, and book imbalance.
 - Optional retained order-book sample depth caps that reduce historical sample memory without changing latest-book state.
+- Optional historical order-book sample product scope that keeps latest order-book state global while retaining replay-backed sample windows only for configured products.
 
 These helpers are not yet a standalone historical market-data subsystem. Market-data work should keep three layers separate:
 
 - Current replayed market state: latest ticker, latest order book, retained accepted trades, and freshness checks.
-- Historical normalized market series: explicit tick/trade windows, candle construction contracts, bounded lookbacks, deterministic time anchors, product scope limits, and retained sample-window extensions where strategy demand justifies them.
+- Historical normalized market series: explicit tick/trade windows, candle construction contracts, bounded lookbacks, deterministic time anchors, scoped retained samples, and retained sample-window extensions where strategy demand justifies them.
 - Derived strategy metrics: rolling volume, VWAP/TWAP, spread/midpoint/microprice, book imbalance, trade-flow imbalance, and volatility/regime metrics.
 
 Further historical order-book metrics should be added only when retained sample-window contracts have enough replay evidence to keep simulation, recovery, and strategy behavior deterministic.

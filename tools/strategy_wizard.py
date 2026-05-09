@@ -290,10 +290,11 @@ __all__ = ["STRATEGY_ID", "{class_name}", "build_strategy"]
 
 def _strategy_text(*, class_name: str, strategy_id: str, template: StrategyWizardTemplate) -> str:
     body = _strategy_evaluate_body(template)
+    extra_imports = _strategy_extra_imports(template)
     return f'''from __future__ import annotations
 
 from collections.abc import Mapping
-from typing import Any
+{extra_imports}from typing import Any
 
 from strategies import StrategyDecision, StrategySnapshot
 
@@ -313,6 +314,12 @@ class {class_name}:
     def evaluate(self, snapshot: StrategySnapshot) -> StrategyDecision:
 {indent(body, "        ")}
 '''
+
+
+def _strategy_extra_imports(template: StrategyWizardTemplate) -> str:
+    if template == StrategyWizardTemplate.MARKET_WINDOW_STATS:
+        return "from datetime import timedelta\n"
+    return ""
 
 
 def _strategy_evaluate_body(template: StrategyWizardTemplate) -> str:
@@ -344,6 +351,49 @@ return StrategyDecision(
         "template": "current_market_data",
         "ticker_sequence": getattr(ticker, "sequence", None),
         "trade_count": len(trades),
+    }
+)'''
+    if template == StrategyWizardTemplate.MARKET_WINDOW_STATS:
+        return '''product_id = self._parameters.get("product_id")
+if not isinstance(product_id, str) or not product_id:
+    return StrategyDecision(
+        metadata={
+            "status": "missing_product_id",
+            "template": "market_window_stats",
+        }
+    )
+
+lookback_seconds = self._parameters.get("lookback_seconds", 300)
+try:
+    lookback = timedelta(seconds=float(lookback_seconds))
+except (TypeError, ValueError):
+    return StrategyDecision(
+        metadata={
+            "status": "invalid_lookback_seconds",
+            "template": "market_window_stats",
+        }
+    )
+
+book_levels = self._parameters.get("book_levels", 1)
+try:
+    levels = int(book_levels)
+except (TypeError, ValueError):
+    return StrategyDecision(
+        metadata={
+            "status": "invalid_book_levels",
+            "template": "market_window_stats",
+        }
+    )
+
+market_stats = snapshot.market_window_stats(product_id, lookback=lookback)
+book_stats = snapshot.order_book_window_stats(product_id, lookback=lookback, levels=levels)
+return StrategyDecision(
+    metadata={
+        "book_window": book_stats.to_payload(),
+        "market_window": market_stats.to_payload(),
+        "product_id": product_id,
+        "status": "ok",
+        "template": "market_window_stats",
     }
 )'''
     if template == StrategyWizardTemplate.METADATA_ONLY:
@@ -422,6 +472,58 @@ def test_strategy_evaluate_reads_current_market_data_without_order_intents() -> 
     assert decision.metadata["has_order_book"] is True
     assert decision.metadata["trade_count"] == 2
     assert decision.metadata["latest_trade_sequence"] == 13
+'''
+    if template == StrategyWizardTemplate.MARKET_WINDOW_STATS:
+        return f'''from __future__ import annotations
+
+from datetime import timedelta
+
+from strategies import StrategyDecision
+
+from {module_name} import STRATEGY_ID, {class_name}, build_strategy
+
+
+class WindowResult:
+    def __init__(self, *, name: str) -> None:
+        self._name = name
+
+    def to_payload(self) -> dict[str, object]:
+        return {{"status": "ok", "window": self._name}}
+
+
+class SnapshotFixture:
+    as_of_sequence = 13
+
+    def market_window_stats(self, product_id: str, *, lookback: timedelta):
+        assert product_id == "BTC-USD"
+        assert lookback == timedelta(minutes=5)
+        return WindowResult(name="market")
+
+    def order_book_window_stats(self, product_id: str, *, lookback: timedelta, levels: int):
+        assert product_id == "BTC-USD"
+        assert lookback == timedelta(minutes=5)
+        assert levels == 1
+        return WindowResult(name="book")
+
+
+def test_strategy_entry_point_factory_returns_expected_strategy() -> None:
+    strategy = build_strategy()
+
+    assert strategy.strategy_id == "{strategy_id}"
+    assert STRATEGY_ID == "{strategy_id}"
+    assert isinstance(strategy, {class_name})
+
+
+def test_strategy_evaluate_reads_window_stats_without_order_intents() -> None:
+    strategy = build_strategy(parameters={{"product_id": "BTC-USD"}})
+
+    decision = strategy.evaluate(SnapshotFixture())  # type: ignore[arg-type]
+
+    assert isinstance(decision, StrategyDecision)
+    assert decision.intents == ()
+    assert decision.metadata["template"] == "market_window_stats"
+    assert decision.metadata["market_window"]["window"] == "market"
+    assert decision.metadata["book_window"]["window"] == "book"
 '''
     return f'''from __future__ import annotations
 
@@ -719,6 +821,8 @@ def _template_description(template: StrategyWizardTemplate) -> str:
         return "empty evaluate() structure returning metadata only until custom logic is added"
     if template == StrategyWizardTemplate.CURRENT_MARKET_DATA:
         return "reads current replayed ticker, order-book, and accepted-trade projection state without emitting order intents"
+    if template == StrategyWizardTemplate.MARKET_WINDOW_STATS:
+        return "reads replayed trade-window and order-book-window statistics without emitting order intents"
     if template == StrategyWizardTemplate.METADATA_ONLY:
         return "reads replayed projection metadata and emits no order intents"
     if template == StrategyWizardTemplate.NOOP:

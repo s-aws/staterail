@@ -44,6 +44,7 @@ from app.operator_policy_scenarios import operator_policy_scenarios_payload
 from app.operator_actions import (
     operator_cancel_all_open_orders_payload,
     operator_cancel_order_payload,
+    operator_canary_evidence_payload,
     operator_open_orders_payload,
     operator_place_order_payload,
 )
@@ -91,7 +92,9 @@ from core.errors import exception_to_error_payload
 from core.errors import ConfigError
 from core.json_tools import JsonValue
 from exchanges.coinbase.advanced_trade_rest import HttpTransport
+from products.replay import product_catalog_from_projection
 from products.tasks import ProductCatalogLookup
+from projections.state import SourceOfTruthProjection
 
 
 ATTENTION_REQUIRED_EXIT_CODE = 2
@@ -289,6 +292,34 @@ def parse_args() -> argparse.Namespace:
             "Dry-run config file used by --operator-canary-plan before the live "
             "config from --config-file is used."
         ),
+    )
+    parser.add_argument(
+        "--operator-canary-evidence",
+        action="store_true",
+        help=(
+            "Replay the ledger and print compact post-canary evidence for one operator "
+            "place/cancel lifecycle without writing to the ledger."
+        ),
+    )
+    parser.add_argument(
+        "--operator-canary-evidence-action-id",
+        default=None,
+        help="Optional place action ID to inspect with --operator-canary-evidence.",
+    )
+    parser.add_argument(
+        "--operator-canary-evidence-exchange-order-id",
+        default=None,
+        help="Optional exchange order ID to inspect with --operator-canary-evidence.",
+    )
+    parser.add_argument(
+        "--operator-canary-evidence-product-id",
+        default=None,
+        help="Optional product filter for --operator-canary-evidence.",
+    )
+    parser.add_argument(
+        "--operator-canary-evidence-fail-on-attention",
+        action="store_true",
+        help="Return a non-zero exit code when post-canary evidence requires attention.",
     )
     parser.add_argument(
         "--operator-canary-render-dry-run-config",
@@ -630,6 +661,7 @@ async def run_from_args(
     operator_policy_scenarios_file = getattr(args, "operator_policy_scenarios_file", None)
     operator_cancel_all_open_orders_requested = getattr(args, "operator_cancel_all_open_orders", False)
     operator_cancel_order_requested = getattr(args, "operator_cancel_order", False)
+    operator_canary_evidence_requested = getattr(args, "operator_canary_evidence", False)
     operator_canary_plan_requested = getattr(args, "operator_canary_plan", False)
     operator_canary_render_requested = getattr(args, "operator_canary_render_dry_run_config", False)
     operator_place_order_requested = getattr(args, "operator_place_order", False)
@@ -676,11 +708,12 @@ async def run_from_args(
             or operator_place_order_requested
             or operator_cancel_order_requested
             or operator_cancel_all_open_orders_requested
+            or operator_canary_evidence_requested
             or getattr(args, "operator_open_orders", False)
         ):
             raise ValueError(
                 "--operator-canary-render-dry-run-config cannot be combined with operator plan, "
-                "place, cancel, or open-order commands"
+                "evidence, place, cancel, or open-order commands"
             )
     if operator_canary_plan_requested:
         if not getattr(args, "config_file", None):
@@ -738,6 +771,7 @@ async def run_from_args(
         "--ledger-export": getattr(args, "ledger_export", False),
         "--ledger-health": getattr(args, "ledger_health", False),
         "--ledger-summary": getattr(args, "ledger_summary", False),
+        "--operator-canary-evidence": operator_canary_evidence_requested,
         "--operator-canary-plan": operator_canary_plan_requested,
         "--operator-open-orders": getattr(args, "operator_open_orders", False),
         "--live-runtime-gate": getattr(args, "live_runtime_gate", False),
@@ -1034,11 +1068,30 @@ async def run_from_args(
                 getattr(args, "operator_place_time_in_force"),
                 "--operator-place-time-in-force",
             ),
+            product_catalog=_product_catalog_from_existing_ledger(config.ledger_path),
         )
         print(json.dumps(payload, indent=2, sort_keys=True))
         return _report_exit_code(
             payload,
             fail_on_attention=True,
+            ok_status=ReadinessStatus.OK.value,
+        )
+
+    if operator_canary_evidence_requested:
+        payload = operator_canary_evidence_payload(
+            config.ledger_path,
+            action_id=getattr(args, "operator_canary_evidence_action_id", None),
+            exchange_order_id=getattr(
+                args,
+                "operator_canary_evidence_exchange_order_id",
+                None,
+            ),
+            product_id=getattr(args, "operator_canary_evidence_product_id", None),
+        )
+        print(json.dumps(payload, indent=2, sort_keys=True))
+        return _report_exit_code(
+            payload,
+            fail_on_attention=getattr(args, "operator_canary_evidence_fail_on_attention", False),
             ok_status=ReadinessStatus.OK.value,
         )
 
@@ -1479,6 +1532,13 @@ def _audit_store_readiness_checks(
             s3_archive_store_factory=s3_archive_store_factory,
         ),
     )
+
+
+def _product_catalog_from_existing_ledger(ledger_path: Path):
+    if not ledger_path.exists() or ledger_path.is_dir():
+        return None
+    projection = SourceOfTruthProjection.from_ledger(AuditLedger(ledger_path))
+    return product_catalog_from_projection(projection)
 
 
 def _anchor_readiness_checks(

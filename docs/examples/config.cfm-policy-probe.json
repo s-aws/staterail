@@ -58,7 +58,9 @@
       "allowed_products": ["REPLACE_WITH_CFM_PRODUCT_IDS"],
       "allowed_order_types": ["limit"],
       "max_order_size": "1",
-      "max_order_notional": "1000",
+      "max_order_notional": "200",
+      "max_daily_notional": "400",
+      "max_open_orders": 2,
       "max_leverage": "3",
       "require_reduce_only": false,
       "kill_switch_enabled": false

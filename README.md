@@ -112,6 +112,8 @@ Generate an external strategy package:
 python -m tools.strategy_wizard --name my-strategy --target ..\my-strategy --template metadata_only
 ```
 
+Use `--template current_market_data` for current replayed projection access or `--template market_window_stats` for no-intent trade-window and order-book-window examples.
+
 Useful strategy-facing docs:
 
 - [Extending](docs/extending.md)

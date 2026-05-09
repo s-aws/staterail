@@ -27,7 +27,9 @@ The tested example file is [docs/examples/config.dry-run.json](examples/config.d
       "allowed_products": ["BTC-USD"],
       "allowed_order_types": ["limit"],
       "max_order_size": "1",
-      "max_order_notional": "1000"
+      "max_order_notional": "200",
+      "max_daily_notional": "400",
+      "max_open_orders": 2
     }
   }
 }
@@ -101,7 +103,7 @@ The checked-in CFM template configures two market-data websocket sources and two
 
 `bot.rest` controls Coinbase REST base URL, execution mode, retry policy, and portfolio IDs.
 
-`bot.risk` controls product allowlists, order-type allowlists, maximum size/notional/leverage, reduce-only mode, and kill switch.
+`bot.risk` controls product allowlists, order-type allowlists, maximum size, per-order notional, daily notional, open-order count, leverage, reduce-only mode, and kill switch.
 
 When product catalog metadata includes a futures `contract_size`, risk and sizing treat notional as `size * limit_price * contract_size`. This matters for CFM products: a displayed low price does not imply a low one-contract notional. Keep `max_order_notional`, operator-policy `max_order_notional_usd`, and staged-release `max_visible_notional_usd` above the product's minimum one-contract notional if a strategy is expected to produce live-visible orders.
 
@@ -119,6 +121,8 @@ When product catalog metadata includes a futures `contract_size`, risk and sizin
 
 `bot.strategies.max_order_book_samples_per_product` is a positive integer that caps replayed order-book samples retained per product in strategy snapshots. It defaults to `1`, which preserves the latest-book behavior and causes order-book sample window helpers to report insufficient data for historical windows. Set it above `1` only when a strategy needs replay-backed order-book sample windows, and size the cap for the strategy's lookback and feed rate.
 
+`bot.strategies.order_book_sample_product_ids` optionally scopes historical order-book sample retention to specific products. Leave it empty to retain capped samples for every product seen in replay. When it is set, latest order-book state is still maintained for every product, but historical sample windows are retained only for the listed products and skipped sample counts are reported in `market_order_book_sample_retention`.
+
 `bot.strategies.max_order_book_sample_depth_per_side` is an optional positive integer that trims retained order-book samples to the top N bid levels and top N ask levels. It does not trim `snapshot.order_book_stats()` latest-book state. Use it with `max_order_book_samples_per_product` when historical book-sample windows are needed but full-depth sample retention would use too much memory.
 
 `bot.strategies.operator_policy_file` loads a checked operator-policy JSON file. `bot.strategies.operator_policy` can also contain the policy inline. The effective action gateway risk policy is the stricter merge of `bot.risk` and the operator policy, so violations become audited action rejections in both simulation preview and runtime submission.
@@ -127,7 +131,7 @@ When product catalog metadata includes a futures `contract_size`, risk and sizin
 
 Operator policy `order_behavior.default_leverage` and `order_behavior.default_margin_type` are optional execution defaults for strategies that create new CFM futures placements. Keep `bot.risk.max_leverage` as a ceiling, not as an order default. CFM strategy templates use `default_leverage: "1"` and `default_margin_type: "cross"` so staged placements can later be released without losing required futures order fields.
 
-For environment config, set `STATERAIL_STRATEGIES_MARKET_DATA_REQUIREMENTS` to a JSON list with the same fields. Set `STATERAIL_STRATEGIES_MAX_MARKET_TRADES_PER_PRODUCT` to the snapshot replay trade cap. Set `STATERAIL_STRATEGIES_MAX_ORDER_BOOK_SAMPLES_PER_PRODUCT` to the snapshot replay order-book sample cap. Set `STATERAIL_STRATEGIES_MAX_ORDER_BOOK_SAMPLE_DEPTH_PER_SIDE` to the retained sample depth cap. Set `STATERAIL_STRATEGIES_PARAMETERS` to a JSON object keyed by strategy ID. Set `STATERAIL_STRATEGIES_OPERATOR_POLICY_FILE` to load a policy file from the operator environment.
+For environment config, set `STATERAIL_STRATEGIES_MARKET_DATA_REQUIREMENTS` to a JSON list with the same fields. Set `STATERAIL_STRATEGIES_MAX_MARKET_TRADES_PER_PRODUCT` to the snapshot replay trade cap. Set `STATERAIL_STRATEGIES_MAX_ORDER_BOOK_SAMPLES_PER_PRODUCT` to the snapshot replay order-book sample cap. Set `STATERAIL_STRATEGIES_ORDER_BOOK_SAMPLE_PRODUCT_IDS` to a comma-separated historical book-sample product scope. Set `STATERAIL_STRATEGIES_MAX_ORDER_BOOK_SAMPLE_DEPTH_PER_SIDE` to the retained sample depth cap. Set `STATERAIL_STRATEGIES_PARAMETERS` to a JSON object keyed by strategy ID. Set `STATERAIL_STRATEGIES_OPERATOR_POLICY_FILE` to load a policy file from the operator environment.
 
 Readiness reports unresolved strategy IDs and invalid built-in strategy parameters before runtime assembly. Entry point names are inspected without importing strategy code. If the built-in `staged-release-manager` is selected for scheduled evaluation, readiness also reports attention when no operator policy is configured, when `staged_or_hidden_release.enabled=false`, when `staged_or_hidden_release.allow_release=false`, or when condition-matched release is enabled without required order-book input. If the built-in `followup-on-fill-manager` is selected, readiness reports attention when no operator policy is configured, followup policy is disabled, or product catalog refresh is disabled. If the built-in `consolidation-manager` is selected, readiness reports attention when no operator policy is configured, merge/consolidation lineage is disabled, or product catalog refresh is disabled. If the built-in `anchor-repricing-manager` is selected, readiness reports attention when no operator policy is configured, anchor repricing is disabled, same-side moves are disabled, cancel-replace fallback is disabled, order-book input is not required, or product catalog refresh is disabled. If the built-in `passive-market-making` strategy is selected, readiness reports attention when no operator policy is configured, staged release is disabled, the default order type is not limit, post-only is disabled, order-book input is not required, or product catalog refresh is disabled. Passive market-making does not require `allow_release=true` because it creates staged placements only.
 

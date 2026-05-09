@@ -6,7 +6,7 @@ import json
 
 import pytest
 
-from actions.gateway import PlaceOrderIntent
+from actions.gateway import ActionCommand, PlaceOrderIntent
 from app.bootstrap import build_coinbase_application
 from app.config_loading import load_coinbase_application_config_from_json_file
 from app.credentials import COINBASE_API_PRIVATE_KEY_ENV, CoinbaseRuntimeCredentialProviders
@@ -20,6 +20,7 @@ from core.enums import (
     ActionType,
     EventType,
     ExecutionMode,
+    OperatorCanaryEvidenceIssue,
     OperatorCanaryPlanIssue,
     OperatorCanaryPlanStep,
     OrderLifecycleStatus,
@@ -434,6 +435,147 @@ def test_cli_operator_open_orders_lists_tracked_open_orders_without_writing(
     assert after_records == before_records
 
 
+def test_cli_operator_canary_evidence_summarizes_cancelled_order_without_writing(
+    workspace_tmp_path,
+    capsys,
+):
+    ledger_path = workspace_tmp_path / "operator-canary-evidence.jsonl"
+    config_path = workspace_tmp_path / "config.json"
+    config_path.write_text(
+        json.dumps(
+            {
+                "ledger_path": ledger_path.as_posix(),
+                "bot": {
+                    "rest": {"execution_mode": ExecutionMode.DRY_RUN.value},
+                    "risk": {
+                        "allowed_order_types": [OrderType.LIMIT.value],
+                        "allowed_products": ["BTC-USD"],
+                        "max_order_size": "1",
+                        "max_order_notional": "1000",
+                    },
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    config = load_coinbase_application_config_from_json_file(config_path)
+    application = build_coinbase_application(config)
+    application.submit_and_execute_action(
+        PlaceOrderIntent(
+            action_id="canary-place-1",
+            limit_price="100",
+            order_type=OrderType.LIMIT,
+            product_id="BTC-USD",
+            side=OrderSide.BUY,
+            size="1",
+        ).to_command()
+    )
+    projection = SourceOfTruthProjection.from_ledger(application.ledger)
+    exchange_order_id = projection.orders_by_action_id["canary-place-1"].exchange_order_id
+    assert exchange_order_id is not None
+    application.submit_and_execute_action(
+        ActionCommand(
+            action_id="canary-cancel-1",
+            action_type=ActionType.CANCEL_ORDER,
+            idempotency_key="canary-cancel-1",
+            payload={"exchange_order_id": exchange_order_id},
+        )
+    )
+    before_records = AuditLedger(ledger_path).iter_records()
+
+    exit_code = asyncio.run(
+        run_from_args(
+            argparse.Namespace(
+                config_file=str(config_path),
+                ledger_path=None,
+                operator_canary_evidence=True,
+                operator_canary_evidence_action_id="canary-place-1",
+                operator_canary_evidence_exchange_order_id=None,
+                operator_canary_evidence_fail_on_attention=True,
+                operator_canary_evidence_product_id="BTC-USD",
+            )
+        )
+    )
+    payload = json.loads(capsys.readouterr().out)
+    after_records = AuditLedger(ledger_path).iter_records()
+
+    assert exit_code == 0
+    assert payload["status"] == ReadinessStatus.OK.value
+    assert payload["writes_ledger"] is False
+    assert payload["action_id"] == "canary-place-1"
+    assert payload["exchange_order_id"] == exchange_order_id
+    assert payload["order"]["lifecycle_status"] == OrderLifecycleStatus.CANCELLED.value
+    assert payload["place_action"]["status"] == ActionStatus.EXECUTED.value
+    assert payload["cancel_action_count"] == 1
+    assert payload["cancel_actions"][0]["action_id"] == "canary-cancel-1"
+    assert payload["cancel_actions"][0]["status"] == ActionStatus.EXECUTED.value
+    assert payload["open_order_count"] == 0
+    assert payload["issues"] == []
+    assert after_records == before_records
+
+
+def test_cli_operator_canary_evidence_reports_unclean_lifecycle(
+    workspace_tmp_path,
+    capsys,
+):
+    ledger_path = workspace_tmp_path / "operator-canary-evidence-attention.jsonl"
+    config_path = workspace_tmp_path / "config.json"
+    config_path.write_text(
+        json.dumps(
+            {
+                "ledger_path": ledger_path.as_posix(),
+                "bot": {
+                    "rest": {"execution_mode": ExecutionMode.DRY_RUN.value},
+                    "risk": {
+                        "allowed_order_types": [OrderType.LIMIT.value],
+                        "allowed_products": ["BTC-USD"],
+                        "max_order_size": "1",
+                        "max_order_notional": "1000",
+                    },
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    config = load_coinbase_application_config_from_json_file(config_path)
+    application = build_coinbase_application(config)
+    application.submit_and_execute_action(
+        PlaceOrderIntent(
+            action_id="canary-place-open",
+            limit_price="100",
+            order_type=OrderType.LIMIT,
+            product_id="BTC-USD",
+            side=OrderSide.BUY,
+            size="1",
+        ).to_command()
+    )
+
+    exit_code = asyncio.run(
+        run_from_args(
+            argparse.Namespace(
+                config_file=str(config_path),
+                ledger_path=None,
+                operator_canary_evidence=True,
+                operator_canary_evidence_action_id="canary-place-open",
+                operator_canary_evidence_exchange_order_id=None,
+                operator_canary_evidence_fail_on_attention=True,
+                operator_canary_evidence_product_id="BTC-USD",
+            )
+        )
+    )
+    payload = json.loads(capsys.readouterr().out)
+    issue_names = {issue["issue"] for issue in payload["issues"]}
+
+    assert exit_code == ATTENTION_REQUIRED_EXIT_CODE
+    assert payload["status"] == ReadinessStatus.ATTENTION_REQUIRED.value
+    assert payload["writes_ledger"] is False
+    assert payload["order"]["lifecycle_status"] == OrderLifecycleStatus.OPEN.value
+    assert payload["open_order_count"] == 1
+    assert OperatorCanaryEvidenceIssue.ORDER_STILL_OPEN.value in issue_names
+    assert OperatorCanaryEvidenceIssue.CANCEL_ACTION_MISSING.value in issue_names
+    assert OperatorCanaryEvidenceIssue.OPEN_ORDERS_REMAIN_FOR_PRODUCT.value in issue_names
+
+
 def test_cli_operator_canary_render_dry_run_config_writes_isolated_valid_config(
     workspace_tmp_path,
     capsys,
@@ -692,6 +834,7 @@ def test_cli_operator_canary_plan_outputs_repeatable_sequence_without_writing(
         OperatorCanaryPlanStep.LIVE_PLACE_ORDER.value,
         OperatorCanaryPlanStep.LIVE_OPEN_ORDERS.value,
         OperatorCanaryPlanStep.LIVE_CANCEL_ORDER.value,
+        OperatorCanaryPlanStep.LIVE_CANARY_EVIDENCE.value,
         OperatorCanaryPlanStep.SOURCE_OF_TRUTH.value,
         OperatorCanaryPlanStep.LEDGER_HEALTH.value,
     ]
@@ -701,6 +844,7 @@ def test_cli_operator_canary_plan_outputs_repeatable_sequence_without_writing(
     assert steps[OperatorCanaryPlanStep.LIVE_PLACE_ORDER.value]["live_order_endpoint"] is True
     assert "--operator-place-order" in steps[OperatorCanaryPlanStep.LIVE_PLACE_ORDER.value]["argv"]
     assert "--operator-cancel-exchange-order-id" in steps[OperatorCanaryPlanStep.LIVE_CANCEL_ORDER.value]["argv"]
+    assert "--operator-canary-evidence" in steps[OperatorCanaryPlanStep.LIVE_CANARY_EVIDENCE.value]["argv"]
     assert not live_ledger_path.exists()
     assert not dry_run_ledger_path.exists()
 
@@ -854,6 +998,89 @@ def test_cli_operator_canary_plan_reports_safety_issues_without_writing(
     assert OperatorCanaryPlanIssue.NON_POSITIVE_SIZE.value in issue_names
     assert OperatorCanaryPlanIssue.NON_POSITIVE_LIMIT_PRICE.value in issue_names
     assert not live_ledger_path.exists()
+    assert not dry_run_ledger_path.exists()
+
+
+def test_cli_operator_canary_plan_rejects_live_product_metadata_notional_risk(
+    workspace_tmp_path,
+    capsys,
+):
+    live_ledger_path = workspace_tmp_path / "operator-canary-live-product.jsonl"
+    dry_run_ledger_path = workspace_tmp_path / "operator-canary-dry-run-product.jsonl"
+    live_config_path = workspace_tmp_path / "live-config.json"
+    dry_run_config_path = workspace_tmp_path / "dry-run-config.json"
+    risk = {
+        "allowed_order_types": [OrderType.LIMIT.value],
+        "allowed_products": ["SHB-26JUN26-CDE"],
+        "max_order_notional": "200",
+    }
+    _write_product_snapshot(
+        live_ledger_path,
+        base_increment="1",
+        base_max_size="1000",
+        base_min_size="1",
+        contract_size="10000",
+        price_increment="0.00001",
+        product_id="SHB-26JUN26-CDE",
+        product_type=ProductType.FUTURE,
+        product_venue=ProductVenue.FCM,
+    )
+    original_live_records = live_ledger_path.read_text(encoding="utf-8").count("\n")
+    live_config_path.write_text(
+        json.dumps(
+            {
+                "ledger_path": live_ledger_path.as_posix(),
+                "bot": {
+                    "rest": {"execution_mode": ExecutionMode.LIVE.value},
+                    "risk": risk,
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    dry_run_config_path.write_text(
+        json.dumps(
+            {
+                "ledger_path": dry_run_ledger_path.as_posix(),
+                "bot": {
+                    "rest": {"execution_mode": ExecutionMode.DRY_RUN.value},
+                    "risk": risk,
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    exit_code = asyncio.run(
+        run_from_args(
+            argparse.Namespace(
+                config_file=str(live_config_path),
+                ledger_path=None,
+                operator_canary_dry_run_config_file=str(dry_run_config_path),
+                operator_canary_plan=True,
+                operator_id="operator-1",
+                operator_place_leverage="1",
+                operator_place_limit_price="100",
+                operator_place_margin_type=None,
+                operator_place_order_type=OrderType.LIMIT.value,
+                operator_place_post_only=True,
+                operator_place_product_id="SHB-26JUN26-CDE",
+                operator_place_reason="operator canary",
+                operator_place_reduce_only=False,
+                operator_place_side=OrderSide.BUY.value,
+                operator_place_size="1",
+                operator_place_time_in_force=TimeInForce.GOOD_UNTIL_CANCELLED.value,
+            )
+        )
+    )
+    payload = json.loads(capsys.readouterr().out)
+    issue_names = {issue["issue"] for issue in payload["issues"]}
+
+    assert exit_code == ATTENTION_REQUIRED_EXIT_CODE
+    assert payload["status"] == ReadinessStatus.ATTENTION_REQUIRED.value
+    assert OperatorCanaryPlanIssue.NOTIONAL_ABOVE_RISK_LIMIT.value in issue_names
+    assert "1000000" in payload["issues"][0]["message"]
+    assert live_ledger_path.read_text(encoding="utf-8").count("\n") == original_live_records
     assert not dry_run_ledger_path.exists()
 
 
@@ -1160,7 +1387,18 @@ class _SuccessfulOrderTransport:
         )
 
 
-def _write_product_snapshot(ledger_path, *, product_id: str) -> None:
+def _write_product_snapshot(
+    ledger_path,
+    *,
+    base_increment: str = "0.00000001",
+    base_max_size: str = "100",
+    base_min_size: str = "0.00000001",
+    contract_size: str | None = None,
+    price_increment: str = "0.01",
+    product_id: str,
+    product_type: ProductType = ProductType.SPOT,
+    product_venue: ProductVenue = ProductVenue.CBE,
+) -> None:
     AuditCore(AuditLedger(ledger_path)).emit(
         EventType.EXCHANGE_PRODUCT_SNAPSHOT,
         {
@@ -1169,27 +1407,27 @@ def _write_product_snapshot(ledger_path, *, product_id: str) -> None:
             "product_ids": [product_id],
             "products": [
                 {
-                    "base_increment": "0.00000001",
-                    "base_max_size": "100",
-                    "base_min_size": "0.00000001",
+                    "base_increment": base_increment,
+                    "base_max_size": base_max_size,
+                    "base_min_size": base_min_size,
                     "cancel_only": False,
-                    "contract_size": None,
+                    "contract_size": contract_size,
                     "is_disabled": False,
                     "limit_only": False,
                     "post_only": False,
-                    "price_increment": "0.01",
+                    "price_increment": price_increment,
                     "product_id": product_id,
-                    "product_type": ProductType.SPOT.value,
-                    "product_venue": ProductVenue.CBE.value,
+                    "product_type": product_type.value,
+                    "product_venue": product_venue.value,
                     "quote_increment": "0.01",
                     "quote_max_size": "1000000",
                     "quote_min_size": "1",
                     "raw": {
-                        "base_increment": "0.00000001",
-                        "price_increment": "0.01",
+                        "base_increment": base_increment,
+                        "price_increment": price_increment,
                         "product_id": product_id,
-                        "product_type": ProductType.SPOT.value,
-                        "product_venue": ProductVenue.CBE.value,
+                        "product_type": product_type.value,
+                        "product_venue": product_venue.value,
                     },
                     "trading_disabled": False,
                     "tradable_for_new_orders": True,

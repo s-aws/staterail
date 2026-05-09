@@ -119,7 +119,9 @@ _KNOWN_ENV_SUFFIXES = frozenset(
         "RISK_ALLOWED_ORDER_TYPES",
         "RISK_ALLOWED_PRODUCTS",
         "RISK_KILL_SWITCH_ENABLED",
+        "RISK_MAX_DAILY_NOTIONAL",
         "RISK_MAX_LEVERAGE",
+        "RISK_MAX_OPEN_ORDERS",
         "RISK_MAX_ORDER_NOTIONAL",
         "RISK_MAX_ORDER_SIZE",
         "RISK_REQUIRE_REDUCE_ONLY",
@@ -131,6 +133,7 @@ _KNOWN_ENV_SUFFIXES = frozenset(
         "STRATEGIES_MAX_ORDER_BOOK_SAMPLE_DEPTH_PER_SIDE",
         "STRATEGIES_MAX_ORDER_BOOK_SAMPLES_PER_PRODUCT",
         "STRATEGIES_OPERATOR_POLICY_FILE",
+        "STRATEGIES_ORDER_BOOK_SAMPLE_PRODUCT_IDS",
         "STRATEGIES_PARAMETERS",
         "STRATEGIES_RUN_ON_START",
         "STRATEGY_IDS",
@@ -179,7 +182,9 @@ _RISK_FIELDS = frozenset(
         "allowed_order_types",
         "allowed_products",
         "kill_switch_enabled",
+        "max_daily_notional",
         "max_leverage",
+        "max_open_orders",
         "max_order_notional",
         "max_order_size",
         "require_reduce_only",
@@ -195,6 +200,7 @@ _STRATEGIES_FIELDS = _SCHEDULE_FIELDS | frozenset(
         "max_order_book_samples_per_product",
         "operator_policy",
         "operator_policy_file",
+        "order_book_sample_product_ids",
         "strategy_parameters",
         "strategy_ids",
     }
@@ -522,7 +528,9 @@ def _risk_config(raw: Mapping[str, Any]) -> RiskPolicyConfig:
             for product_id in _sequence(raw.get("allowed_products", ()), "bot.risk.allowed_products")
         ),
         kill_switch_enabled=_bool(raw.get("kill_switch_enabled", False), "bot.risk.kill_switch_enabled"),
+        max_daily_notional=_optional_decimal(raw.get("max_daily_notional"), "bot.risk.max_daily_notional"),
         max_leverage=_optional_decimal(raw.get("max_leverage"), "bot.risk.max_leverage"),
+        max_open_orders=_optional_int(raw.get("max_open_orders"), "bot.risk.max_open_orders"),
         max_order_notional=_optional_decimal(raw.get("max_order_notional"), "bot.risk.max_order_notional"),
         max_order_size=_optional_decimal(raw.get("max_order_size"), "bot.risk.max_order_size"),
         require_reduce_only=_bool(raw.get("require_reduce_only", False), "bot.risk.require_reduce_only"),
@@ -597,6 +605,13 @@ def _strategies_config(raw: Mapping[str, Any]) -> StrategyRuntimeConfig:
             else _positive_int(
                 raw.get("max_order_book_samples_per_product"),
                 "bot.strategies.max_order_book_samples_per_product",
+            )
+        ),
+        order_book_sample_product_ids=tuple(
+            _string(product_id, "bot.strategies.order_book_sample_product_ids[]")
+            for product_id in _sequence(
+                raw.get("order_book_sample_product_ids", ()),
+                "bot.strategies.order_book_sample_product_ids",
             )
         ),
         operator_policy=_operator_policy_config(raw),
@@ -910,6 +925,8 @@ def _env_to_raw(environment: Mapping[str, str], *, prefix: str) -> dict[str, Any
     _set_csv_if_present(risk, "allowed_order_types", environment.get(f"{prefix}RISK_ALLOWED_ORDER_TYPES"))
     _set_if_present(risk, "max_order_size", environment.get(f"{prefix}RISK_MAX_ORDER_SIZE"))
     _set_if_present(risk, "max_order_notional", environment.get(f"{prefix}RISK_MAX_ORDER_NOTIONAL"))
+    _set_if_present(risk, "max_daily_notional", environment.get(f"{prefix}RISK_MAX_DAILY_NOTIONAL"))
+    _set_if_present(risk, "max_open_orders", environment.get(f"{prefix}RISK_MAX_OPEN_ORDERS"))
     _set_if_present(risk, "max_leverage", environment.get(f"{prefix}RISK_MAX_LEVERAGE"))
     _set_if_present(risk, "require_reduce_only", environment.get(f"{prefix}RISK_REQUIRE_REDUCE_ONLY"))
     _set_if_present(risk, "kill_switch_enabled", environment.get(f"{prefix}RISK_KILL_SWITCH_ENABLED"))
@@ -942,6 +959,11 @@ def _env_to_raw(environment: Mapping[str, str], *, prefix: str) -> dict[str, Any
         strategies,
         "max_order_book_samples_per_product",
         environment.get(f"{prefix}STRATEGIES_MAX_ORDER_BOOK_SAMPLES_PER_PRODUCT"),
+    )
+    _set_csv_if_present(
+        strategies,
+        "order_book_sample_product_ids",
+        environment.get(f"{prefix}STRATEGIES_ORDER_BOOK_SAMPLE_PRODUCT_IDS"),
     )
     _set_if_present(
         strategies,
@@ -1251,6 +1273,12 @@ def _optional_string(value: Any, field_name: str) -> str | None:
     if value is None:
         return None
     return _string(value, field_name)
+
+
+def _optional_int(value: Any, field_name: str) -> int | None:
+    if value is None:
+        return None
+    return _positive_int(value, field_name)
 
 
 def _optional_decimal(value: Any, field_name: str) -> Decimal | None:

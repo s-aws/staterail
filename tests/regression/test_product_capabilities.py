@@ -27,8 +27,15 @@ def test_venue_capabilities_describe_current_coinbase_adapter_contract():
     assert cfm.is_ok
     assert cfm.product_venues == (ProductVenue.FCM,)
     assert cfm.supports_live_execution is True
+    assert cfm.supports_product_metadata_lookup is True
+    assert cfm.supports_market_data_websocket is True
+    assert cfm.supports_user_order_websocket is True
     assert cfm.supports_place_orders is True
     assert cfm.supports_cancel_orders is True
+    assert cfm.supports_order_lookup is True
+    assert cfm.supports_fill_lookup is True
+    assert cfm.supports_account_lookup is True
+    assert cfm.supports_position_lookup is True
     assert cfm.supports_amend is False
     assert cfm.supports_reduce_only is False
     assert cfm.supports_attached_orders is False
@@ -38,9 +45,15 @@ def test_venue_capabilities_describe_current_coinbase_adapter_contract():
         TimeInForce.IMMEDIATE_OR_CANCEL,
         TimeInForce.FILL_OR_KILL,
     )
+    assert cfm.to_payload()["supports_fill_lookup"] is True
+    assert cfm.to_payload()["supports_position_lookup"] is True
     assert spot.supports_live_execution is True
+    assert spot.supports_product_metadata_lookup is True
+    assert spot.supports_position_lookup is False
     assert intx.status == StrategyHelperStatus.OK
     assert intx.supports_live_execution is False
+    assert intx.supports_product_metadata_lookup is True
+    assert intx.supports_order_lookup is False
     assert unknown.status == StrategyHelperStatus.MISSING
     assert unknown.reason == "unknown_venue"
 

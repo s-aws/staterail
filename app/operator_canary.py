@@ -21,6 +21,7 @@ from core.enums import (
     TimeInForce,
 )
 from core.json_tools import JsonValue, normalize_json
+from products.catalog import ProductCatalog
 
 
 OPERATOR_CANARY_PLAN_SCHEMA_VERSION = 1
@@ -136,6 +137,7 @@ def operator_canary_plan_payload(
     side: OrderSide,
     size: str,
     time_in_force: TimeInForce,
+    product_catalog: ProductCatalog | None = None,
 ) -> dict[str, JsonValue]:
     if not isinstance(live_config, CoinbaseApplicationConfig):
         raise TypeError("live_config must be a CoinbaseApplicationConfig")
@@ -155,9 +157,12 @@ def operator_canary_plan_payload(
         raise TypeError("time_in_force must be a TimeInForce")
     if margin_type is not None and not isinstance(margin_type, MarginType):
         raise TypeError("margin_type must be a MarginType")
+    if product_catalog is not None and not isinstance(product_catalog, ProductCatalog):
+        raise TypeError("product_catalog must be a ProductCatalog when provided")
 
     live_config_path = Path(live_config_file)
     dry_run_config_path = Path(dry_run_config_file)
+    live_risk = effective_risk_policy_config(live_config.bot)
     issues = [
         *_config_issues(
             live_config,
@@ -181,6 +186,13 @@ def operator_canary_plan_payload(
             limit_price=limit_price,
             order_type=order_type,
             post_only=post_only,
+            size=size,
+        ),
+        *_product_metadata_issues(
+            product_catalog,
+            limit_price=limit_price,
+            product_id=product_id,
+            risk=live_risk,
             size=size,
         ),
     ]
@@ -361,6 +373,95 @@ def _order_shape_issues(
     return issues
 
 
+def _product_metadata_issues(
+    product_catalog: ProductCatalog | None,
+    *,
+    limit_price: str,
+    product_id: str,
+    risk: Any,
+    size: str,
+) -> list[dict[str, JsonValue]]:
+    if product_catalog is None or not product_catalog.values():
+        return []
+    product = product_catalog.get(product_id)
+    if product is None:
+        return [
+            _issue(
+                OperatorCanaryPlanIssue.PRODUCT_METADATA_MISSING,
+                role=OperatorCanaryConfigRole.LIVE,
+                message=(
+                    f"live ledger has product metadata, but none for product_id {product_id!r}; "
+                    "run live no-order preflight for this product before canary placement"
+                ),
+            )
+        ]
+
+    issues: list[dict[str, JsonValue]] = []
+    price = _positive_decimal_or_none(limit_price)
+    order_size = _positive_decimal_or_none(size)
+    if price is None or order_size is None:
+        return issues
+
+    if not product.price_is_valid(price):
+        issues.append(
+            _issue(
+                OperatorCanaryPlanIssue.PRICE_INCREMENT_INVALID,
+                role=OperatorCanaryConfigRole.LIVE,
+                message=(
+                    f"limit_price {limit_price!r} does not satisfy product price increment "
+                    f"{product.price_increment}"
+                ),
+            )
+        )
+    if not product.size_is_valid(order_size):
+        issues.append(
+            _issue(
+                OperatorCanaryPlanIssue.SIZE_INCREMENT_INVALID,
+                role=OperatorCanaryConfigRole.LIVE,
+                message=(
+                    f"size {size!r} does not satisfy product size rules "
+                    f"min={product.base_min_size}, max={product.base_max_size}, "
+                    f"increment={product.base_increment}"
+                ),
+            )
+        )
+    notional = product.notional(order_size, price)
+    if notional is None:
+        issues.append(
+            _issue(
+                OperatorCanaryPlanIssue.PRODUCT_NOTIONAL_INVALID,
+                role=OperatorCanaryConfigRole.LIVE,
+                message="canary notional could not be calculated from product metadata",
+            )
+        )
+        return issues
+
+    if not product.notional_is_valid(order_size, price):
+        issues.append(
+            _issue(
+                OperatorCanaryPlanIssue.PRODUCT_NOTIONAL_INVALID,
+                role=OperatorCanaryConfigRole.LIVE,
+                message=(
+                    f"notional {notional} does not satisfy product quote notional rules "
+                    f"min={product.quote_min_size}, max={product.quote_max_size}"
+                ),
+            )
+        )
+    max_order_notional = getattr(risk, "max_order_notional", None)
+    if max_order_notional is not None and notional > max_order_notional:
+        issues.append(
+            _issue(
+                OperatorCanaryPlanIssue.NOTIONAL_ABOVE_RISK_LIMIT,
+                role=OperatorCanaryConfigRole.LIVE,
+                message=(
+                    f"canary notional {notional} exceeds configured max_order_notional "
+                    f"{max_order_notional}"
+                ),
+            )
+        )
+    return issues
+
+
 def _steps(
     *,
     dry_run_config_file: str,
@@ -498,6 +599,19 @@ def _steps(
             writes_ledger=True,
         ),
         _step(
+            OperatorCanaryPlanStep.LIVE_CANARY_EVIDENCE,
+            _argv(
+                live_config_file,
+                "--operator-canary-evidence",
+                "--operator-canary-evidence-exchange-order-id",
+                EXCHANGE_ORDER_ID_PLACEHOLDER,
+                "--operator-canary-evidence-product-id",
+                product_id,
+                "--operator-canary-evidence-fail-on-attention",
+            ),
+            description="Replay compact post-canary evidence after live cleanup.",
+        ),
+        _step(
             OperatorCanaryPlanStep.SOURCE_OF_TRUTH,
             _argv(live_config_file, "--source-of-truth"),
             description="Replay the ledger and inspect source-of-truth state after cleanup.",
@@ -622,10 +736,17 @@ def _issue(
 
 
 def _positive_decimal(value: str) -> bool:
+    return _positive_decimal_or_none(value) is not None
+
+
+def _positive_decimal_or_none(value: str) -> Decimal | None:
     try:
-        return Decimal(value) > Decimal("0")
+        parsed = Decimal(value)
     except (InvalidOperation, TypeError, ValueError):
-        return False
+        return None
+    if parsed <= Decimal("0"):
+        return None
+    return parsed
 
 
 def _load_json_mapping(path: Path) -> dict[str, Any]:

@@ -1158,6 +1158,7 @@ def test_strategy_task_applies_order_book_sample_retention_cap_to_snapshots(work
         executor=DryRunExecutor(),
         max_order_book_sample_depth_per_side=1,
         max_order_book_samples_per_product=2,
+        order_book_sample_product_ids=("AVA-29MAY26-CDE",),
         strategies=(OrderBookWindowMetadataStrategy(),),
     )
 
@@ -1179,6 +1180,7 @@ def test_strategy_task_applies_order_book_sample_retention_cap_to_snapshots(work
     assert result["submitted_action_count"] == 0
     assert started.payload["max_order_book_sample_depth_per_side"] == 1
     assert started.payload["max_order_book_samples_per_product"] == 2
+    assert started.payload["order_book_sample_product_ids"] == ["AVA-29MAY26-CDE"]
     assert metadata["order_book_window"]["status"] == StrategyMarketDataStatus.OK.value
     assert metadata["order_book_window"]["sample_count"] == 2
     assert metadata["order_book_window"]["sample_sequences"] == [4, 6]
@@ -1187,6 +1189,9 @@ def test_strategy_task_applies_order_book_sample_retention_cap_to_snapshots(work
         "dropped_count": 1,
         "max_order_book_sample_depth_per_side": 1,
         "max_order_book_samples_per_product": 2,
+        "order_book_sample_product_ids": ["AVA-29MAY26-CDE"],
+        "scope_skipped_by_product_id": {},
+        "scope_skipped_count": 0,
     }
 
 

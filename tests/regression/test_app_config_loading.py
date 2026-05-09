@@ -70,7 +70,9 @@ def test_load_application_config_from_mapping_converts_raw_values_to_typed_confi
                     "allowed_order_types": ["limit", "market"],
                     "allowed_products": ["BTC-USD", "ETH-USD"],
                     "kill_switch_enabled": False,
+                    "max_daily_notional": "5000",
                     "max_leverage": "3",
+                    "max_open_orders": 4,
                     "max_order_notional": "1000.50",
                     "max_order_size": "2.5",
                     "require_reduce_only": True,
@@ -95,6 +97,7 @@ def test_load_application_config_from_mapping_converts_raw_values_to_typed_confi
                     "max_market_trades_per_product": 500,
                     "max_order_book_sample_depth_per_side": 10,
                     "max_order_book_samples_per_product": 25,
+                    "order_book_sample_product_ids": ["BTC-USD"],
                     "operator_policy_file": "docs/examples/operator-policy.conservative-cfm-v0.json",
                     "run_on_start": False,
                     "strategy_ids": ["noop"],
@@ -224,7 +227,9 @@ def test_load_application_config_from_mapping_converts_raw_values_to_typed_confi
     assert config.bot.risk.allowed_order_types == (OrderType.LIMIT, OrderType.MARKET)
     assert config.bot.risk.allowed_products == ("BTC-USD", "ETH-USD")
     assert config.bot.risk.kill_switch_enabled is False
+    assert config.bot.risk.max_daily_notional == Decimal("5000")
     assert config.bot.risk.max_leverage == Decimal("3")
+    assert config.bot.risk.max_open_orders == 4
     assert config.bot.risk.max_order_notional == Decimal("1000.50")
     assert config.bot.risk.max_order_size == Decimal("2.5")
     assert config.bot.risk.require_reduce_only is True
@@ -245,6 +250,7 @@ def test_load_application_config_from_mapping_converts_raw_values_to_typed_confi
     assert config.bot.strategies.max_market_trades_per_product == 500
     assert config.bot.strategies.max_order_book_sample_depth_per_side == 10
     assert config.bot.strategies.max_order_book_samples_per_product == 25
+    assert config.bot.strategies.order_book_sample_product_ids == ("BTC-USD",)
     assert config.bot.strategies.operator_policy is not None
     assert config.bot.strategies.operator_policy.policy_name == "conservative_cfm_policy_v0"
     assert config.bot.strategies.allow_live_execution is True
@@ -499,7 +505,9 @@ def test_load_application_config_from_env_converts_strings_to_typed_config(works
         "STATERAIL_RISK_ALLOWED_PRODUCTS": "BTC-USD,ETH-USD",
         "STATERAIL_RISK_ALLOWED_ORDER_TYPES": "limit,market",
         "STATERAIL_RISK_KILL_SWITCH_ENABLED": "true",
+        "STATERAIL_RISK_MAX_DAILY_NOTIONAL": "1000.50",
         "STATERAIL_RISK_MAX_LEVERAGE": "2",
+        "STATERAIL_RISK_MAX_OPEN_ORDERS": "3",
         "STATERAIL_RISK_MAX_ORDER_NOTIONAL": "500.25",
         "STATERAIL_RISK_MAX_ORDER_SIZE": "1.5",
         "STATERAIL_RISK_REQUIRE_REDUCE_ONLY": "false",
@@ -522,6 +530,7 @@ def test_load_application_config_from_env_converts_strings_to_typed_config(works
         "STATERAIL_STRATEGIES_MAX_MARKET_TRADES_PER_PRODUCT": "250",
         "STATERAIL_STRATEGIES_MAX_ORDER_BOOK_SAMPLE_DEPTH_PER_SIDE": "5",
         "STATERAIL_STRATEGIES_MAX_ORDER_BOOK_SAMPLES_PER_PRODUCT": "20",
+        "STATERAIL_STRATEGIES_ORDER_BOOK_SAMPLE_PRODUCT_IDS": "BTC-USD,ETH-USD",
         "STATERAIL_STRATEGIES_OPERATOR_POLICY_FILE": "docs/examples/operator-policy.conservative-cfm-v0.json",
         "STATERAIL_STRATEGIES_RUN_ON_START": "false",
         "STATERAIL_STRATEGY_IDS": "noop",
@@ -586,7 +595,9 @@ def test_load_application_config_from_env_converts_strings_to_typed_config(works
     assert config.bot.risk.allowed_products == ("BTC-USD", "ETH-USD")
     assert config.bot.risk.allowed_order_types == (OrderType.LIMIT, OrderType.MARKET)
     assert config.bot.risk.kill_switch_enabled is True
+    assert config.bot.risk.max_daily_notional == Decimal("1000.50")
     assert config.bot.risk.max_leverage == Decimal("2")
+    assert config.bot.risk.max_open_orders == 3
     assert config.bot.risk.max_order_notional == Decimal("500.25")
     assert config.bot.risk.max_order_size == Decimal("1.5")
     assert config.bot.risk.require_reduce_only is False
@@ -604,6 +615,7 @@ def test_load_application_config_from_env_converts_strings_to_typed_config(works
     assert config.bot.strategies.max_market_trades_per_product == 250
     assert config.bot.strategies.max_order_book_sample_depth_per_side == 5
     assert config.bot.strategies.max_order_book_samples_per_product == 20
+    assert config.bot.strategies.order_book_sample_product_ids == ("BTC-USD", "ETH-USD")
     assert config.bot.strategies.operator_policy is not None
     assert config.bot.strategies.operator_policy.policy_name == "conservative_cfm_policy_v0"
     assert config.bot.strategies.allow_live_execution is True

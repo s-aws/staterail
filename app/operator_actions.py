@@ -13,6 +13,7 @@ from core.enums import (
     ActionType,
     MarginType,
     OperatorActionSkipReason,
+    OperatorCanaryEvidenceIssue,
     OrderLifecycleStatus,
     OrderSide,
     OrderType,
@@ -20,7 +21,7 @@ from core.enums import (
     TimeInForce,
 )
 from core.json_tools import JsonValue, canonical_json, normalize_json
-from projections.state import OrderSnapshot, SourceOfTruthProjection
+from projections.state import ActionSnapshot, OrderSnapshot, SourceOfTruthProjection
 
 
 OPERATOR_ACTION_SCHEMA_VERSION = 1
@@ -68,6 +69,89 @@ def operator_open_orders_payload(
     normalized = normalize_json(payload)
     if not isinstance(normalized, dict):
         raise TypeError("operator open-orders payload must normalize to an object")
+    return normalized
+
+
+def operator_canary_evidence_payload(
+    ledger_path: str | Path,
+    *,
+    action_id: str | None = None,
+    exchange_order_id: str | None = None,
+    product_id: str | None = None,
+) -> dict[str, JsonValue]:
+    view = load_verified_ledger_view(ledger_path)
+    projection = view.projection
+    order, selection_issues = _select_canary_order(
+        projection,
+        action_id=action_id,
+        exchange_order_id=exchange_order_id,
+        product_id=product_id,
+    )
+    issues = list(selection_issues)
+    if order is not None:
+        issues.extend(_canary_lifecycle_issues(projection, order, product_id=product_id))
+    issues = _unique_canary_issues(issues)
+
+    cancel_actions = tuple(
+        projection.actions[cancel_action_id]
+        for cancel_action_id in (order.cancel_action_ids if order is not None else ())
+        if cancel_action_id in projection.actions
+    )
+    effective_product_id = product_id or (order.product_id if order is not None else None)
+    open_orders = tuple(
+        sorted(
+            (
+                open_order
+                for open_order in projection.open_orders
+                if effective_product_id is None or open_order.product_id == effective_product_id
+            ),
+            key=lambda open_order: (
+                open_order.requested_sequence if open_order.requested_sequence is not None else 0,
+                open_order.action_id,
+            ),
+        )
+    )
+    payload = {
+        "action_id": order.action_id if order is not None else action_id,
+        "cancel_action_count": len(cancel_actions),
+        "cancel_actions": [_action_payload(action) for action in cancel_actions],
+        "client_order_id": order.client_order_id if order is not None else None,
+        "exchange_order_id": order.exchange_order_id if order is not None else exchange_order_id,
+        "issues": [_issue_payload(issue) for issue in issues],
+        "ledger": {
+            "last_hash": view.state.last_hash,
+            "ledger_path": view.ledger_path.as_posix(),
+            "next_sequence": view.state.next_sequence,
+            "record_count": len(view.records),
+            "verified": True,
+        },
+        "logical_order_id": (
+            projection.logical_order_id_by_action_id.get(order.action_id)
+            if order is not None
+            else None
+        ),
+        "open_order_count": len(open_orders),
+        "open_orders": [_open_order_payload(open_order) for open_order in open_orders],
+        "order": _open_order_payload(order) if order is not None else None,
+        "place_action": (
+            _action_payload(projection.actions[order.action_id])
+            if order is not None and order.action_id in projection.actions
+            else None
+        ),
+        "product_id": effective_product_id,
+        "runtime_tasks_started": False,
+        "schema_version": OPERATOR_ACTION_SCHEMA_VERSION,
+        "status": (
+            ReadinessStatus.OK.value
+            if not issues
+            else ReadinessStatus.ATTENTION_REQUIRED.value
+        ),
+        "websocket_started": False,
+        "writes_ledger": False,
+    }
+    normalized = normalize_json(payload)
+    if not isinstance(normalized, dict):
+        raise TypeError("operator canary evidence payload must normalize to an object")
     return normalized
 
 
@@ -200,6 +284,100 @@ def operator_cancel_all_open_orders_payload(
     if not isinstance(normalized, dict):
         raise TypeError("operator cancel-all payload must normalize to an object")
     return normalized
+
+
+def _select_canary_order(
+    projection: SourceOfTruthProjection,
+    *,
+    action_id: str | None,
+    exchange_order_id: str | None,
+    product_id: str | None,
+) -> tuple[OrderSnapshot | None, list[OperatorCanaryEvidenceIssue]]:
+    issues: list[OperatorCanaryEvidenceIssue] = []
+    action_order = projection.orders_by_action_id.get(action_id) if action_id is not None else None
+    exchange_order = (
+        projection.orders_by_exchange_order_id.get(exchange_order_id)
+        if exchange_order_id is not None
+        else None
+    )
+    if action_id is not None and action_order is None:
+        issues.append(OperatorCanaryEvidenceIssue.NO_MATCHING_ORDER)
+    if exchange_order_id is not None and exchange_order is None:
+        issues.append(OperatorCanaryEvidenceIssue.NO_MATCHING_ORDER)
+    if action_order is not None and exchange_order is not None and action_order.action_id != exchange_order.action_id:
+        issues.append(OperatorCanaryEvidenceIssue.IDENTIFIER_MISMATCH)
+        return None, issues
+
+    order = action_order or exchange_order
+    if order is None and action_id is None and exchange_order_id is None:
+        candidates = tuple(
+            sorted(
+                (
+                    candidate
+                    for candidate in projection.orders_by_action_id.values()
+                    if product_id is None or candidate.product_id == product_id
+                ),
+                key=lambda candidate: (
+                    candidate.requested_sequence if candidate.requested_sequence is not None else 0,
+                    candidate.action_id,
+                ),
+                reverse=True,
+            )
+        )
+        order = candidates[0] if candidates else None
+        if order is None:
+            issues.append(OperatorCanaryEvidenceIssue.NO_MATCHING_ORDER)
+
+    if order is not None and product_id is not None and order.product_id != product_id:
+        issues.append(OperatorCanaryEvidenceIssue.PRODUCT_MISMATCH)
+    return order, issues
+
+
+def _canary_lifecycle_issues(
+    projection: SourceOfTruthProjection,
+    order: OrderSnapshot,
+    *,
+    product_id: str | None,
+) -> list[OperatorCanaryEvidenceIssue]:
+    issues: list[OperatorCanaryEvidenceIssue] = []
+    place_action = projection.actions.get(order.action_id)
+    if place_action is None:
+        issues.append(OperatorCanaryEvidenceIssue.PLACE_ACTION_MISSING)
+    elif place_action.status != ActionStatus.EXECUTED:
+        issues.append(OperatorCanaryEvidenceIssue.PLACE_ACTION_NOT_EXECUTED)
+
+    if order.lifecycle_status in {
+        OrderLifecycleStatus.ACCEPTED,
+        OrderLifecycleStatus.CANCEL_QUEUED,
+        OrderLifecycleStatus.EXECUTION_UNKNOWN,
+        OrderLifecycleStatus.OPEN,
+        OrderLifecycleStatus.PENDING,
+        OrderLifecycleStatus.REQUESTED,
+    }:
+        issues.append(OperatorCanaryEvidenceIssue.ORDER_STILL_OPEN)
+    elif order.lifecycle_status == OrderLifecycleStatus.FILLED:
+        issues.append(OperatorCanaryEvidenceIssue.ORDER_FILLED)
+    elif order.lifecycle_status != OrderLifecycleStatus.CANCELLED:
+        issues.append(OperatorCanaryEvidenceIssue.ORDER_NOT_CANCELLED)
+
+    if not order.cancel_action_ids:
+        issues.append(OperatorCanaryEvidenceIssue.CANCEL_ACTION_MISSING)
+    for cancel_action_id in order.cancel_action_ids:
+        cancel_action = projection.actions.get(cancel_action_id)
+        if cancel_action is None:
+            issues.append(OperatorCanaryEvidenceIssue.CANCEL_ACTION_MISSING)
+        elif cancel_action.status != ActionStatus.EXECUTED:
+            issues.append(OperatorCanaryEvidenceIssue.CANCEL_ACTION_NOT_EXECUTED)
+
+    effective_product_id = product_id or order.product_id
+    remaining_open_orders = tuple(
+        open_order
+        for open_order in projection.open_orders
+        if effective_product_id is None or open_order.product_id == effective_product_id
+    )
+    if remaining_open_orders:
+        issues.append(OperatorCanaryEvidenceIssue.OPEN_ORDERS_REMAIN_FOR_PRODUCT)
+    return issues
 
 
 def operator_cancel_order_payload(
@@ -585,6 +763,45 @@ def _receipt_payload(receipt: ActionReceipt) -> dict[str, JsonValue]:
     if not isinstance(normalized, dict):
         raise TypeError("operator cancel receipt payload must normalize to an object")
     return normalized
+
+
+def _action_payload(action: ActionSnapshot) -> dict[str, JsonValue]:
+    payload = {
+        "accepted_sequence": action.accepted_sequence,
+        "action_id": action.action_id,
+        "executed_sequence": action.executed_sequence,
+        "execution_started_sequence": action.execution_started_sequence,
+        "failed_sequence": action.failed_sequence,
+        "failure_reason": action.failure_reason.value if action.failure_reason is not None else None,
+        "rejected_sequence": action.rejected_sequence,
+        "requested_sequence": action.requested_sequence,
+        "status": action.status.value,
+    }
+    normalized = normalize_json(payload)
+    if not isinstance(normalized, dict):
+        raise TypeError("operator action payload must normalize to an object")
+    return normalized
+
+
+def _issue_payload(issue: OperatorCanaryEvidenceIssue) -> dict[str, JsonValue]:
+    payload = {"issue": issue.value}
+    normalized = normalize_json(payload)
+    if not isinstance(normalized, dict):
+        raise TypeError("operator canary evidence issue payload must normalize to an object")
+    return normalized
+
+
+def _unique_canary_issues(
+    issues: list[OperatorCanaryEvidenceIssue],
+) -> list[OperatorCanaryEvidenceIssue]:
+    unique: list[OperatorCanaryEvidenceIssue] = []
+    seen: set[OperatorCanaryEvidenceIssue] = set()
+    for issue in issues:
+        if issue in seen:
+            continue
+        unique.append(issue)
+        seen.add(issue)
+    return unique
 
 
 def _operator_requested_by(operator_id: str) -> str:
