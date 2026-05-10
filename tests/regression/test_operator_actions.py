@@ -10,6 +10,7 @@ from actions.gateway import ActionCommand, PlaceOrderIntent
 from app.bootstrap import build_coinbase_application
 from app.config_loading import load_coinbase_application_config_from_json_file
 from app.credentials import COINBASE_API_PRIVATE_KEY_ENV, CoinbaseRuntimeCredentialProviders
+from app.ledger_health import ledger_health_payload
 from app.live_safety import LIVE_TRADING_APPROVAL_ENV
 from app.main import ATTENTION_REQUIRED_EXIT_CODE, run_from_args
 from audit.ledger import AuditLedger
@@ -19,7 +20,11 @@ from core.enums import (
     ActionStatus,
     ActionType,
     EventType,
+    ExchangeLookupStatus,
+    ExchangeOrderStatus,
     ExecutionMode,
+    LedgerHealthCheckName,
+    LedgerHealthStatus,
     OperatorCanaryEvidenceIssue,
     OperatorCanaryPlanIssue,
     OperatorCanaryPlanStep,
@@ -293,6 +298,72 @@ def test_cli_operator_place_order_uses_mocked_live_executor_path(
     assert transport.posts[0]["json_body"]["product_id"] == "BTC-USD"
 
 
+def test_cli_operator_lookup_order_records_exchange_update(
+    workspace_tmp_path,
+    capsys,
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        "app.main.load_coinbase_runtime_credentials_from_env",
+        lambda: CoinbaseRuntimeCredentialProviders(
+            token_provider=static_token_provider("test-token"),
+        ),
+    )
+    ledger_path = workspace_tmp_path / "operator-lookup-order.jsonl"
+    config_path = workspace_tmp_path / "config.json"
+    config_path.write_text(
+        json.dumps(
+            {
+                "ledger_path": ledger_path.as_posix(),
+                "bot": {
+                    "rest": {"execution_mode": ExecutionMode.LIVE.value},
+                    "risk": {
+                        "allowed_order_types": [OrderType.LIMIT.value],
+                        "allowed_products": ["BTC-USD"],
+                        "max_order_size": "2",
+                        "max_order_notional": "1000",
+                    },
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    transport = _SuccessfulOrderLookupTransport(exchange_order_id="exchange-live-1")
+
+    exit_code = asyncio.run(
+        run_from_args(
+            argparse.Namespace(
+                config_file=str(config_path),
+                ledger_path=None,
+                operator_id="operator-1",
+                operator_lookup_exchange_order_id="exchange-live-1",
+                operator_lookup_order=True,
+                operator_lookup_reason="post-cancel venue verification",
+            ),
+            transport=transport,
+        )
+    )
+    payload = json.loads(capsys.readouterr().out)
+    records = AuditLedger(ledger_path).iter_records()
+    projection = SourceOfTruthProjection.from_records(records)
+    order = projection.orders_by_exchange_order_id["exchange-live-1"]
+
+    assert exit_code == 0
+    assert payload["status"] == ReadinessStatus.OK.value
+    assert payload["lookup_status"] == ExchangeLookupStatus.FOUND.value
+    assert payload["writes_ledger"] is True
+    assert payload["order_endpoint_called"] is False
+    assert payload["order_update_sequence"] == records[-1].sequence
+    assert payload["order_update"]["status"] == ExchangeOrderStatus.CANCELLED.value
+    assert records[-1].event_type == EventType.EXCHANGE_ORDER_UPDATE
+    assert records[-1].payload["operator_id"] == "operator-1"
+    assert records[-1].payload["reason"] == "post-cancel venue verification"
+    assert records[-1].payload["order_update"]["order_id"] == "exchange-live-1"
+    assert order.lifecycle_status == OrderLifecycleStatus.CANCELLED
+    assert len(transport.gets) == 1
+    assert transport.posts == []
+
+
 def test_cli_operator_cancel_order_routes_through_gateway_and_executor(
     workspace_tmp_path,
     capsys,
@@ -512,6 +583,91 @@ def test_cli_operator_canary_evidence_summarizes_cancelled_order_without_writing
     assert payload["open_order_count"] == 0
     assert payload["issues"] == []
     assert after_records == before_records
+
+
+def test_cli_operator_canary_evidence_can_record_result(
+    workspace_tmp_path,
+    capsys,
+):
+    ledger_path = workspace_tmp_path / "operator-canary-evidence-record.jsonl"
+    config_path = workspace_tmp_path / "config.json"
+    config_path.write_text(
+        json.dumps(
+            {
+                "ledger_path": ledger_path.as_posix(),
+                "bot": {
+                    "rest": {"execution_mode": ExecutionMode.DRY_RUN.value},
+                    "risk": {
+                        "allowed_order_types": [OrderType.LIMIT.value],
+                        "allowed_products": ["BTC-USD"],
+                        "max_order_size": "1",
+                        "max_order_notional": "1000",
+                    },
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    config = load_coinbase_application_config_from_json_file(config_path)
+    application = build_coinbase_application(config)
+    application.submit_and_execute_action(
+        PlaceOrderIntent(
+            action_id="canary-place-record",
+            limit_price="100",
+            order_type=OrderType.LIMIT,
+            product_id="BTC-USD",
+            side=OrderSide.BUY,
+            size="1",
+        ).to_command()
+    )
+    projection = SourceOfTruthProjection.from_ledger(application.ledger)
+    exchange_order_id = projection.orders_by_action_id["canary-place-record"].exchange_order_id
+    assert exchange_order_id is not None
+    application.submit_and_execute_action(
+        ActionCommand(
+            action_id="canary-cancel-record",
+            action_type=ActionType.CANCEL_ORDER,
+            idempotency_key="canary-cancel-record",
+            payload={"exchange_order_id": exchange_order_id},
+        )
+    )
+    before_records = AuditLedger(ledger_path).iter_records()
+
+    exit_code = asyncio.run(
+        run_from_args(
+            argparse.Namespace(
+                config_file=str(config_path),
+                ledger_path=None,
+                operator_canary_evidence=True,
+                operator_canary_evidence_action_id="canary-place-record",
+                operator_canary_evidence_exchange_order_id=None,
+                operator_canary_evidence_fail_on_attention=True,
+                operator_canary_evidence_product_id="BTC-USD",
+                operator_canary_evidence_record_result=True,
+            )
+        )
+    )
+    payload = json.loads(capsys.readouterr().out)
+    after_records = AuditLedger(ledger_path).iter_records()
+    recorded_projection = SourceOfTruthProjection.from_records(after_records)
+    health = ledger_health_payload(ledger_path)
+    health_checks = {check["name"]: check for check in health["checks"]}
+
+    assert exit_code == 0
+    assert payload["status"] == ReadinessStatus.OK.value
+    assert payload["writes_ledger"] is True
+    assert payload["operator_canary_evidence_result_sequence"] == after_records[-1].sequence
+    assert len(after_records) == len(before_records) + 1
+    assert after_records[-1].event_type == EventType.OPERATOR_CANARY_EVIDENCE_RESULT
+    assert after_records[-1].payload["status"] == ReadinessStatus.OK.value
+    assert after_records[-1].payload["issue_count"] == 0
+    assert after_records[-1].payload["issue_names"] == []
+    assert after_records[-1].payload["evidence_read_only"] is True
+    assert recorded_projection.operator_canary_evidence_results[0].status == ReadinessStatus.OK
+    assert recorded_projection.operator_canary_evidence_results[0].action_id == "canary-place-record"
+    assert health_checks[
+        LedgerHealthCheckName.OPERATOR_CANARY_EVIDENCE_RESULT_CONTRACT.value
+    ]["status"] == LedgerHealthStatus.OK.value
 
 
 def test_cli_operator_canary_evidence_reports_unclean_lifecycle(
@@ -834,6 +990,7 @@ def test_cli_operator_canary_plan_outputs_repeatable_sequence_without_writing(
         OperatorCanaryPlanStep.LIVE_PLACE_ORDER.value,
         OperatorCanaryPlanStep.LIVE_OPEN_ORDERS.value,
         OperatorCanaryPlanStep.LIVE_CANCEL_ORDER.value,
+        OperatorCanaryPlanStep.LIVE_LOOKUP_ORDER.value,
         OperatorCanaryPlanStep.LIVE_CANARY_EVIDENCE.value,
         OperatorCanaryPlanStep.SOURCE_OF_TRUTH.value,
         OperatorCanaryPlanStep.LEDGER_HEALTH.value,
@@ -844,7 +1001,10 @@ def test_cli_operator_canary_plan_outputs_repeatable_sequence_without_writing(
     assert steps[OperatorCanaryPlanStep.LIVE_PLACE_ORDER.value]["live_order_endpoint"] is True
     assert "--operator-place-order" in steps[OperatorCanaryPlanStep.LIVE_PLACE_ORDER.value]["argv"]
     assert "--operator-cancel-exchange-order-id" in steps[OperatorCanaryPlanStep.LIVE_CANCEL_ORDER.value]["argv"]
+    assert "--operator-lookup-exchange-order-id" in steps[OperatorCanaryPlanStep.LIVE_LOOKUP_ORDER.value]["argv"]
     assert "--operator-canary-evidence" in steps[OperatorCanaryPlanStep.LIVE_CANARY_EVIDENCE.value]["argv"]
+    assert steps[OperatorCanaryPlanStep.LIVE_LOOKUP_ORDER.value]["writes_ledger"] is True
+    assert steps[OperatorCanaryPlanStep.LIVE_CANARY_EVIDENCE.value]["writes_ledger"] is True
     assert not live_ledger_path.exists()
     assert not dry_run_ledger_path.exists()
 
@@ -1385,6 +1545,50 @@ class _SuccessfulOrderTransport:
                 },
             },
         )
+
+
+class _SuccessfulOrderLookupTransport:
+    def __init__(self, *, exchange_order_id: str) -> None:
+        self._exchange_order_id = exchange_order_id
+        self.gets: list[dict[str, object]] = []
+        self.posts: list[dict[str, object]] = []
+
+    def get(self, url, *, headers, query_params=None):
+        self.gets.append(
+            {
+                "headers": dict(headers),
+                "query_params": query_params,
+                "url": url,
+            }
+        )
+        return HttpResponse(
+            status_code=200,
+            body={
+                "order": {
+                    "client_order_id": "client-live-1",
+                    "order_configuration": {
+                        "limit_limit_gtc": {
+                            "base_size": "1",
+                            "limit_price": "100",
+                        }
+                    },
+                    "order_id": self._exchange_order_id,
+                    "product_id": "BTC-USD",
+                    "side": "BUY",
+                    "status": ExchangeOrderStatus.CANCELLED.value,
+                }
+            },
+        )
+
+    def post(self, url, *, headers, json_body):
+        self.posts.append(
+            {
+                "headers": dict(headers),
+                "json_body": dict(json_body),
+                "url": url,
+            }
+        )
+        raise AssertionError(f"unexpected POST request: {url}")
 
 
 def _write_product_snapshot(

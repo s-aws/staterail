@@ -40,7 +40,10 @@ class LedgerSummary:
     market_trade_count: int
     live_preflight_result_count: int
     latest_live_preflight_sequence: int | None
+    latest_operator_canary_evidence_sequence: int | None
+    latest_operator_canary_evidence_status: str | None
     latest_strategy_simulation_sequence: int | None
+    operator_canary_evidence_result_count: int
     open_order_count: int
     order_count: int
     passive_market_making_quote_count: int
@@ -89,6 +92,12 @@ class LedgerSummary:
             "latest_config_fingerprint_algorithm": self.latest_config_fingerprint_algorithm,
             "latest_config_schema_version": self.latest_config_schema_version,
             "latest_live_preflight_sequence": self.latest_live_preflight_sequence,
+            "latest_operator_canary_evidence_sequence": (
+                self.latest_operator_canary_evidence_sequence
+            ),
+            "latest_operator_canary_evidence_status": (
+                self.latest_operator_canary_evidence_status
+            ),
             "latest_runtime_health_check_sequence": self.latest_runtime_health_check_sequence,
             "latest_runtime_health_check_status": self.latest_runtime_health_check_status,
             "latest_strategy_simulation_sequence": self.latest_strategy_simulation_sequence,
@@ -99,6 +108,7 @@ class LedgerSummary:
             "market_trade_count": self.market_trade_count,
             "next_sequence": self.next_sequence,
             "open_order_count": self.open_order_count,
+            "operator_canary_evidence_result_count": self.operator_canary_evidence_result_count,
             "order_count": self.order_count,
             "passive_market_making_quote_count": self.passive_market_making_quote_count,
             "passive_market_making_released_quote_count": (
@@ -139,6 +149,11 @@ def summarize_ledger(path: str | Path) -> LedgerSummary:
         if projection.runtime_health_check_results
         else None
     )
+    latest_operator_canary_evidence = (
+        projection.operator_canary_evidence_results[-1]
+        if projection.operator_canary_evidence_results
+        else None
+    )
 
     return LedgerSummary(
         accepted_data_count=projection.accepted_data_count,
@@ -176,6 +191,17 @@ def summarize_ledger(path: str | Path) -> LedgerSummary:
             if projection.live_preflight_results
             else None
         ),
+        latest_operator_canary_evidence_sequence=(
+            latest_operator_canary_evidence.sequence
+            if latest_operator_canary_evidence is not None
+            else None
+        ),
+        latest_operator_canary_evidence_status=(
+            latest_operator_canary_evidence.status.value
+            if latest_operator_canary_evidence is not None
+            and latest_operator_canary_evidence.status is not None
+            else None
+        ),
         latest_runtime_health_check_sequence=(
             latest_runtime_health_check.sequence
             if latest_runtime_health_check is not None
@@ -198,6 +224,7 @@ def summarize_ledger(path: str | Path) -> LedgerSummary:
         market_trade_count=projection.market_trade_count,
         next_sequence=state.next_sequence,
         open_order_count=len(projection.open_orders),
+        operator_canary_evidence_result_count=len(projection.operator_canary_evidence_results),
         order_count=len(projection.orders_by_action_id),
         passive_market_making_quote_count=len(passive_quotes),
         passive_market_making_released_quote_count=sum(

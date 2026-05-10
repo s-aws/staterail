@@ -12,6 +12,7 @@ from core.enums import (
     ProductVenue,
     StrategyHelperStatus,
     TimeInForce,
+    VenueCapabilityRequirement,
 )
 from core.json_tools import JsonValue, normalize_json
 from products.catalog import ProductCatalog, ProductMetadata
@@ -160,6 +161,94 @@ class ProductCapabilities:
         )
 
 
+@dataclass(frozen=True)
+class VenueContractCheck:
+    requirement: VenueCapabilityRequirement
+    supported: bool
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.requirement, VenueCapabilityRequirement):
+            raise TypeError("requirement must be a VenueCapabilityRequirement")
+        if not isinstance(self.supported, bool):
+            raise TypeError("supported must be a bool")
+
+    def to_payload(self) -> dict[str, JsonValue]:
+        return _object_payload(
+            {
+                "requirement": self.requirement.value,
+                "supported": self.supported,
+            },
+            "venue contract check payload",
+        )
+
+
+@dataclass(frozen=True)
+class VenueContractReport:
+    venue: ProductVenue | OperatorPolicyVenue
+    status: StrategyHelperStatus
+    checks: tuple[VenueContractCheck, ...]
+    missing_requirements: tuple[VenueCapabilityRequirement, ...] = ()
+    capabilities: VenueCapabilities | None = None
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.venue, ProductVenue | OperatorPolicyVenue):
+            raise TypeError("venue must be a ProductVenue or OperatorPolicyVenue")
+        if not isinstance(self.status, StrategyHelperStatus):
+            raise TypeError("status must be a StrategyHelperStatus")
+        if not isinstance(self.checks, tuple) or any(
+            not isinstance(check, VenueContractCheck) for check in self.checks
+        ):
+            raise TypeError("checks must be a tuple of VenueContractCheck values")
+        _validate_enum_tuple(
+            self.missing_requirements,
+            VenueCapabilityRequirement,
+            "missing_requirements",
+        )
+        if self.capabilities is not None and not isinstance(self.capabilities, VenueCapabilities):
+            raise TypeError("capabilities must be VenueCapabilities when provided")
+
+    @property
+    def is_ok(self) -> bool:
+        return self.status == StrategyHelperStatus.OK
+
+    def to_payload(self) -> dict[str, JsonValue]:
+        return _object_payload(
+            {
+                "capabilities": (
+                    self.capabilities.to_payload()
+                    if self.capabilities is not None
+                    else None
+                ),
+                "checks": [check.to_payload() for check in self.checks],
+                "missing_requirements": [
+                    requirement.value for requirement in self.missing_requirements
+                ],
+                "status": self.status.value,
+                "venue": self.venue.value,
+            },
+            "venue contract report payload",
+        )
+
+
+LIVE_ORDER_ROUTING_REQUIREMENTS = (
+    VenueCapabilityRequirement.LIVE_EXECUTION,
+    VenueCapabilityRequirement.PRODUCT_METADATA_LOOKUP,
+    VenueCapabilityRequirement.MARKET_DATA_WEBSOCKET,
+    VenueCapabilityRequirement.USER_ORDER_WEBSOCKET,
+    VenueCapabilityRequirement.PLACE_ORDERS,
+    VenueCapabilityRequirement.CANCEL_ORDERS,
+    VenueCapabilityRequirement.ORDER_LOOKUP,
+    VenueCapabilityRequirement.FILL_LOOKUP,
+    VenueCapabilityRequirement.ACCOUNT_LOOKUP,
+)
+
+
+CFM_LIVE_ORDER_ROUTING_REQUIREMENTS = (
+    *LIVE_ORDER_ROUTING_REQUIREMENTS,
+    VenueCapabilityRequirement.POSITION_LOOKUP,
+)
+
+
 def venue_capabilities(venue: ProductVenue | OperatorPolicyVenue | str) -> VenueCapabilities:
     resolved = _venue_or_policy_venue(venue)
     if resolved == OperatorPolicyVenue.COINBASE_CFM:
@@ -299,6 +388,69 @@ def _venue_or_policy_venue(value: ProductVenue | OperatorPolicyVenue | str) -> P
         return ProductVenue(value)
     except ValueError:
         return ProductVenue.UNKNOWN
+
+
+def venue_contract_report(
+    capabilities_or_venue: VenueCapabilities | ProductVenue | OperatorPolicyVenue | str,
+    *,
+    requirements: tuple[VenueCapabilityRequirement, ...] = LIVE_ORDER_ROUTING_REQUIREMENTS,
+) -> VenueContractReport:
+    if not isinstance(requirements, tuple):
+        raise TypeError("requirements must be a tuple")
+    _validate_enum_tuple(requirements, VenueCapabilityRequirement, "requirements")
+    capabilities = (
+        capabilities_or_venue
+        if isinstance(capabilities_or_venue, VenueCapabilities)
+        else venue_capabilities(capabilities_or_venue)
+    )
+    checks = tuple(
+        VenueContractCheck(
+            requirement=requirement,
+            supported=_supports_requirement(capabilities, requirement),
+        )
+        for requirement in requirements
+    )
+    missing_requirements = tuple(
+        check.requirement for check in checks if not check.supported
+    )
+    return VenueContractReport(
+        capabilities=capabilities,
+        checks=checks,
+        missing_requirements=missing_requirements,
+        status=(
+            StrategyHelperStatus.OK
+            if capabilities.is_ok and not missing_requirements
+            else StrategyHelperStatus.MISSING
+        ),
+        venue=capabilities.venue,
+    )
+
+
+def _supports_requirement(
+    capabilities: VenueCapabilities,
+    requirement: VenueCapabilityRequirement,
+) -> bool:
+    if requirement == VenueCapabilityRequirement.ACCOUNT_LOOKUP:
+        return capabilities.supports_account_lookup
+    if requirement == VenueCapabilityRequirement.CANCEL_ORDERS:
+        return capabilities.supports_cancel_orders
+    if requirement == VenueCapabilityRequirement.FILL_LOOKUP:
+        return capabilities.supports_fill_lookup
+    if requirement == VenueCapabilityRequirement.LIVE_EXECUTION:
+        return capabilities.supports_live_execution
+    if requirement == VenueCapabilityRequirement.MARKET_DATA_WEBSOCKET:
+        return capabilities.supports_market_data_websocket
+    if requirement == VenueCapabilityRequirement.ORDER_LOOKUP:
+        return capabilities.supports_order_lookup
+    if requirement == VenueCapabilityRequirement.PLACE_ORDERS:
+        return capabilities.supports_place_orders
+    if requirement == VenueCapabilityRequirement.POSITION_LOOKUP:
+        return capabilities.supports_position_lookup
+    if requirement == VenueCapabilityRequirement.PRODUCT_METADATA_LOOKUP:
+        return capabilities.supports_product_metadata_lookup
+    if requirement == VenueCapabilityRequirement.USER_ORDER_WEBSOCKET:
+        return capabilities.supports_user_order_websocket
+    raise ValueError(f"unsupported venue capability requirement: {requirement.value}")
 
 
 def _validate_enum_tuple(values: tuple[Enum, ...], enum_type: type[Enum], field_name: str) -> None:

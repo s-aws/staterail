@@ -468,6 +468,18 @@ class LivePreflightResultSnapshot:
 
 
 @dataclass
+class OperatorCanaryEvidenceResultSnapshot:
+    sequence: int
+    status: ReadinessStatus | None = None
+    action_id: str | None = None
+    exchange_order_id: str | None = None
+    issue_count: int = 0
+    issue_names: tuple[str, ...] = ()
+    payload: dict[str, JsonValue] = field(default_factory=dict)
+    product_id: str | None = None
+
+
+@dataclass
 class RuntimeHealthCheckResultSnapshot:
     sequence: int
     checked_health_status: LedgerHealthStatus | None = None
@@ -534,6 +546,7 @@ class SourceOfTruthProjection:
         self.audit_checkpoints: list[LedgerCheckpointSnapshot] = []
         self.live_preflight_results: list[LivePreflightResultSnapshot] = []
         self.ledger_health_acknowledgements: list[LedgerHealthAcknowledgementSnapshot] = []
+        self.operator_canary_evidence_results: list[OperatorCanaryEvidenceResultSnapshot] = []
         self.runtime_health_check_results: list[RuntimeHealthCheckResultSnapshot] = []
         self.strategy_simulation_results: list[StrategySimulationResultSnapshot] = []
         self.data_messages: dict[str, DataMessageSnapshot] = {}
@@ -660,12 +673,16 @@ class SourceOfTruthProjection:
             self._apply_exchange_position_snapshot(record)
         elif record.event_type == EventType.EXCHANGE_PRODUCT_SNAPSHOT:
             self._apply_exchange_product_snapshot(record)
+        elif record.event_type == EventType.EXCHANGE_ORDER_UPDATE:
+            self._apply_direct_exchange_order_update(record)
         elif record.event_type == EventType.EXCHANGE_REQUEST_RETRY:
             self._apply_exchange_request_retry(record)
         elif record.event_type == EventType.OPERATOR_LEDGER_HEALTH_ACKNOWLEDGED:
             self._apply_ledger_health_acknowledgement(record)
         elif record.event_type == EventType.LIVE_PREFLIGHT_RESULT:
             self._apply_live_preflight_result(record)
+        elif record.event_type == EventType.OPERATOR_CANARY_EVIDENCE_RESULT:
+            self._apply_operator_canary_evidence_result(record)
         elif record.event_type == EventType.RUNTIME_HEALTH_CHECK_RESULT:
             self._apply_runtime_health_check_result(record)
         elif record.event_type == EventType.STRATEGY_SIMULATION_RESULT:
@@ -942,6 +959,7 @@ class SourceOfTruthProjection:
             "market_trades": self.market_trades_by_id,
             "open_order_action_ids": [order.action_id for order in self.open_orders],
             "orders": self.orders_by_action_id,
+            "operator_canary_evidence_results": self.operator_canary_evidence_results,
             "out_of_order_sequences": self.out_of_order_sequences,
             "order_placements": self.placements_by_id,
             "passive_market_making_quotes": {
@@ -1027,6 +1045,21 @@ class SourceOfTruthProjection:
                 payload=payload,
                 record_count=_int_or_none(payload.get("record_count")),
                 sequence=record.sequence,
+            )
+        )
+
+    def _apply_operator_canary_evidence_result(self, record: AuditRecord) -> None:
+        payload = _payload_dict(record.payload)
+        self.operator_canary_evidence_results.append(
+            OperatorCanaryEvidenceResultSnapshot(
+                action_id=_string_or_none(payload.get("action_id")),
+                exchange_order_id=_string_or_none(payload.get("exchange_order_id")),
+                issue_count=_int_or_zero(payload.get("issue_count")),
+                issue_names=_string_tuple(payload.get("issue_names")),
+                payload=payload,
+                product_id=_string_or_none(payload.get("product_id")),
+                sequence=record.sequence,
+                status=_readiness_status_or_none(payload.get("status")),
             )
         )
 
@@ -1418,6 +1451,12 @@ class SourceOfTruthProjection:
             payload=payload,
         )
 
+        order_update = _payload_dict(payload.get("order_update"))
+        if order_update:
+            self._apply_exchange_order_update(record, order_update)
+
+    def _apply_direct_exchange_order_update(self, record: AuditRecord) -> None:
+        payload = _payload_dict(record.payload)
         order_update = _payload_dict(payload.get("order_update"))
         if order_update:
             self._apply_exchange_order_update(record, order_update)

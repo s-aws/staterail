@@ -29,6 +29,7 @@ from core.enums import (
     OrderPlacementKind,
     OrderPlacementStatus,
     OrderSide,
+    OperatorCanaryEvidenceIssue,
     PreflightStep,
     ReadinessStatus,
     RuntimeComponent,
@@ -202,6 +203,7 @@ def ledger_health(
         _trigger_contract_check(view.records),
         _strategy_contract_check(view.records),
         _strategy_simulation_contract_check(view.records),
+        _operator_canary_evidence_result_contract_check(view.records),
         _ledger_health_acknowledgement_contract_check(view.records),
         _runtime_health_check_result_contract_check(view.records),
         _runtime_task_contract_check(view.records),
@@ -1412,6 +1414,120 @@ def _strategy_simulation_contract_check(records: tuple[AuditRecord, ...]) -> Led
 
     return _check(
         LedgerHealthCheckName.STRATEGY_SIMULATION_CONTRACT,
+        count=len(anomalies),
+        details={
+            "anomalies": anomalies,
+            "anomaly_count": len(anomalies),
+        },
+    )
+
+
+def _operator_canary_evidence_result_contract_check(
+    records: tuple[AuditRecord, ...],
+) -> LedgerHealthCheckResult:
+    anomalies: list[dict[str, JsonValue]] = []
+    for record in records:
+        if record.event_type != EventType.OPERATOR_CANARY_EVIDENCE_RESULT:
+            continue
+
+        payload = _dict_or_empty(record.payload)
+        missing_fields: list[str] = []
+        invalid_fields: list[str] = []
+        for field_name in (
+            "cancel_action_count",
+            "config_fingerprint",
+            "evidence_ledger",
+            "evidence_read_only",
+            "fingerprint_algorithm",
+            "issue_count",
+            "issue_names",
+            "ledger_path",
+            "open_order_count",
+            "order_endpoint_called",
+            "recording_writes_ledger",
+            "runtime_tasks_started",
+            "schema_version",
+            "status",
+            "websocket_started",
+        ):
+            if field_name not in payload:
+                missing_fields.append(field_name)
+
+        status = _readiness_status_or_none(payload.get("status"))
+        issue_count = _int_or_none(payload.get("issue_count"))
+        issue_names = _string_list(payload.get("issue_names"))
+
+        if payload.get("schema_version") != 1:
+            invalid_fields.append("schema_version")
+        if _string_or_none(payload.get("config_fingerprint")) is None:
+            invalid_fields.append("config_fingerprint")
+        if payload.get("fingerprint_algorithm") != CONFIG_FINGERPRINT_ALGORITHM:
+            invalid_fields.append("fingerprint_algorithm")
+        if _string_or_none(payload.get("ledger_path")) is None:
+            invalid_fields.append("ledger_path")
+        if status is None:
+            invalid_fields.append("status")
+        for field_name in ("cancel_action_count", "issue_count", "open_order_count"):
+            parsed = _int_or_none(payload.get(field_name))
+            if parsed is None or parsed < 0:
+                invalid_fields.append(field_name)
+        if not _is_string_list(payload.get("issue_names")):
+            invalid_fields.append("issue_names")
+        else:
+            for issue_name in issue_names:
+                if _operator_canary_evidence_issue_or_none(issue_name) is None:
+                    invalid_fields.append("issue_names")
+                    break
+        if issue_count is not None and issue_count >= 0 and len(issue_names) != issue_count:
+            invalid_fields.append("issue_count")
+            invalid_fields.append("issue_names")
+        if status == ReadinessStatus.OK and issue_count != 0:
+            invalid_fields.append("issue_count")
+            invalid_fields.append("status")
+        if status == ReadinessStatus.ATTENTION_REQUIRED and issue_count == 0:
+            invalid_fields.append("issue_count")
+            invalid_fields.append("status")
+        for field_name in ("order_endpoint_called", "runtime_tasks_started", "websocket_started"):
+            if payload.get(field_name) is not False:
+                invalid_fields.append(field_name)
+        if payload.get("evidence_read_only") is not True:
+            invalid_fields.append("evidence_read_only")
+        if payload.get("recording_writes_ledger") is not True:
+            invalid_fields.append("recording_writes_ledger")
+
+        evidence_ledger = _dict_or_empty(payload.get("evidence_ledger"))
+        if not evidence_ledger:
+            invalid_fields.append("evidence_ledger")
+        else:
+            if evidence_ledger.get("verified") is not True:
+                invalid_fields.append("evidence_ledger.verified")
+            next_sequence = _int_or_none(evidence_ledger.get("next_sequence"))
+            record_count = _int_or_none(evidence_ledger.get("record_count"))
+            if next_sequence is None or next_sequence < 0:
+                invalid_fields.append("evidence_ledger.next_sequence")
+            if record_count is None or record_count < 0:
+                invalid_fields.append("evidence_ledger.record_count")
+            if (
+                evidence_ledger.get("last_hash") is not None
+                and _string_or_none(evidence_ledger.get("last_hash")) is None
+            ):
+                invalid_fields.append("evidence_ledger.last_hash")
+
+        if not missing_fields and not invalid_fields:
+            continue
+
+        anomalies.append(
+            {
+                "invalid_fields": sorted(set(invalid_fields)),
+                "issue_names": issue_names,
+                "missing_fields": missing_fields,
+                "sequence": record.sequence,
+                "status": _string_or_none(payload.get("status")),
+            }
+        )
+
+    return _check(
+        LedgerHealthCheckName.OPERATOR_CANARY_EVIDENCE_RESULT_CONTRACT,
         count=len(anomalies),
         details={
             "anomalies": anomalies,
@@ -3631,6 +3747,15 @@ def _strategy_evaluation_status_or_none(value: JsonValue) -> StrategyEvaluationS
 def _strategy_simulation_status_or_none(value: JsonValue) -> StrategySimulationStatus | None:
     try:
         return StrategySimulationStatus(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _operator_canary_evidence_issue_or_none(
+    value: JsonValue,
+) -> OperatorCanaryEvidenceIssue | None:
+    try:
+        return OperatorCanaryEvidenceIssue(value)
     except (TypeError, ValueError):
         return None
 

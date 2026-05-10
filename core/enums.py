@@ -42,6 +42,7 @@ class EventType(StringEnum):
     RECONCILIATION_RECOVERY = "reconciliation.recovery"
     OPERATOR_LEDGER_HEALTH_ACKNOWLEDGED = "operator.ledger_health_acknowledged"
     LIVE_PREFLIGHT_RESULT = "runtime.live_preflight_result"
+    OPERATOR_CANARY_EVIDENCE_RESULT = "runtime.operator_canary_evidence_result"
     RUNTIME_HEALTH_CHECK_RESULT = "runtime.health_check_result"
     STRATEGY_SIMULATION_RESULT = "runtime.strategy_simulation_result"
     RUNTIME_TASK_COMPLETED = "runtime.task_completed"
@@ -145,6 +146,7 @@ class LedgerHealthCheckName(StringEnum):
     ORDER_IDENTITY_CONTRACT = "order_identity_contract"
     ORDER_LINEAGE_CONTRACT = "order_lineage_contract"
     ORDER_UPDATE_CONTRACT = "order_update_contract"
+    OPERATOR_CANARY_EVIDENCE_RESULT_CONTRACT = "operator_canary_evidence_result_contract"
     PRODUCT_CATALOG_FRESHNESS = "product_catalog_freshness"
     RECONCILIATION = "reconciliation"
     RUNTIME_HEALTH_CHECK_RESULT_CONTRACT = "runtime_health_check_result_contract"
@@ -559,6 +561,7 @@ class OperatorCanaryPlanStep(StringEnum):
     LEDGER_HEALTH = "ledger_health"
     LIVE_CANARY_EVIDENCE = "live_canary_evidence"
     LIVE_CANCEL_ORDER = "live_cancel_order"
+    LIVE_LOOKUP_ORDER = "live_lookup_order"
     LIVE_NO_ORDER_PREFLIGHT = "live_no_order_preflight"
     LIVE_OPEN_ORDERS = "live_open_orders"
     LIVE_PLACE_ORDER = "live_place_order"
@@ -670,6 +673,25 @@ class StrategyHelperStatus(StringEnum):
     INSUFFICIENT_DATA = "insufficient_data"
     MISSING = "missing"
     OK = "ok"
+
+
+class VenueCapabilityRequirement(StringEnum):
+    ACCOUNT_LOOKUP = "account_lookup"
+    CANCEL_ORDERS = "cancel_orders"
+    FILL_LOOKUP = "fill_lookup"
+    LIVE_EXECUTION = "live_execution"
+    MARKET_DATA_WEBSOCKET = "market_data_websocket"
+    ORDER_LOOKUP = "order_lookup"
+    PLACE_ORDERS = "place_orders"
+    POSITION_LOOKUP = "position_lookup"
+    PRODUCT_METADATA_LOOKUP = "product_metadata_lookup"
+    USER_ORDER_WEBSOCKET = "user_order_websocket"
+
+
+class VenueContractRequirementSet(StringEnum):
+    CFM_LIVE_ORDER_ROUTING = "cfm_live_order_routing"
+    LIVE_ORDER_ROUTING = "live_order_routing"
+    PRODUCT_METADATA_LOOKUP = "product_metadata_lookup"
 
 
 class ScheduledSliceStatus(StringEnum):

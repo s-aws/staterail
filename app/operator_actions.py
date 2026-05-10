@@ -7,10 +7,18 @@ from pathlib import Path
 
 from actions.gateway import ActionCommand, ActionReceipt, PlaceOrderIntent
 from app.bootstrap import CoinbaseApplication, CoinbaseApplicationConfig
+from app.config_fingerprint import (
+    CONFIG_FINGERPRINT_ALGORITHM,
+    application_config_fingerprint,
+)
 from app.ledger_view import load_verified_ledger_view
+from audit.ledger import AuditLedger, AuditRecord
+from core.engine import AuditCore
 from core.enums import (
     ActionStatus,
     ActionType,
+    EventType,
+    ExchangeLookupStatus,
     MarginType,
     OperatorActionSkipReason,
     OperatorCanaryEvidenceIssue,
@@ -25,6 +33,8 @@ from projections.state import ActionSnapshot, OrderSnapshot, SourceOfTruthProjec
 
 
 OPERATOR_ACTION_SCHEMA_VERSION = 1
+OPERATOR_CANARY_EVIDENCE_RESULT_SCHEMA_VERSION = 1
+OPERATOR_ORDER_LOOKUP_SCHEMA_VERSION = 1
 OPERATOR_REQUESTED_BY_PREFIX = "operator:"
 OPERATOR_CANCEL_REQUESTED_BY_PREFIX = OPERATOR_REQUESTED_BY_PREFIX
 OPERATOR_CANCEL_ALL_DEFAULT_REASON = "operator cancel all tracked open orders"
@@ -69,6 +79,97 @@ def operator_open_orders_payload(
     normalized = normalize_json(payload)
     if not isinstance(normalized, dict):
         raise TypeError("operator open-orders payload must normalize to an object")
+    return normalized
+
+
+def operator_lookup_order_payload(
+    config: CoinbaseApplicationConfig,
+    application: CoinbaseApplication,
+    *,
+    exchange_order_id: str,
+    operator_id: str,
+    reason: str,
+) -> dict[str, JsonValue]:
+    if not exchange_order_id:
+        raise ValueError("exchange_order_id is required")
+    if not operator_id:
+        raise ValueError("operator_id is required")
+    if not reason:
+        raise ValueError("reason is required")
+
+    lookup_client = application.assembly.order_lookup_client
+    if lookup_client is None:
+        payload = {
+            "error_code": "order_lookup_client_missing",
+            "error_message": "configured runtime does not provide an order lookup client",
+            "exchange_order_id": exchange_order_id,
+            "ledger_path": Path(config.ledger_path).as_posix(),
+            "lookup_status": ExchangeLookupStatus.FAILED.value,
+            "operator_id": operator_id,
+            "order_endpoint_called": False,
+            "order_update": None,
+            "order_update_sequence": None,
+            "reason": reason,
+            "runtime_tasks_started": False,
+            "schema_version": OPERATOR_ORDER_LOOKUP_SCHEMA_VERSION,
+            "status": ReadinessStatus.ATTENTION_REQUIRED.value,
+            "status_code": None,
+            "websocket_started": False,
+            "writes_ledger": False,
+        }
+        normalized = normalize_json(payload)
+        if not isinstance(normalized, dict):
+            raise TypeError("operator order lookup payload must normalize to an object")
+        return normalized
+
+    lookup = lookup_client.get_order(exchange_order_id)
+    order_update = _payload_dict(lookup.order_update)
+    raw_response = _payload_dict(lookup.raw_response)
+    order_update_sequence: int | None = None
+    if lookup.status == ExchangeLookupStatus.FOUND and order_update:
+        record = application.core.emit(
+            EventType.EXCHANGE_ORDER_UPDATE,
+            {
+                "exchange_order_id": exchange_order_id,
+                "lookup_status": lookup.status.value,
+                "operator_id": operator_id,
+                "order_update": order_update,
+                "raw_response": raw_response,
+                "reason": reason,
+                "schema_version": OPERATOR_ORDER_LOOKUP_SCHEMA_VERSION,
+                "status_code": lookup.status_code,
+            },
+        )
+        order_update_sequence = record.sequence
+
+    payload = {
+        "error_category": lookup.error_category.value if lookup.error_category is not None else None,
+        "error_code": lookup.error_code,
+        "error_message": lookup.error_message,
+        "exchange_order_id": exchange_order_id,
+        "ledger_path": Path(config.ledger_path).as_posix(),
+        "lookup_status": lookup.status.value,
+        "operator_id": operator_id,
+        "order_endpoint_called": False,
+        "order_update": order_update if order_update else None,
+        "order_update_sequence": order_update_sequence,
+        "raw_response": raw_response,
+        "reason": reason,
+        "retryable": lookup.retryable,
+        "runtime_tasks_started": False,
+        "schema_version": OPERATOR_ORDER_LOOKUP_SCHEMA_VERSION,
+        "status": (
+            ReadinessStatus.OK.value
+            if lookup.status == ExchangeLookupStatus.FOUND
+            else ReadinessStatus.ATTENTION_REQUIRED.value
+        ),
+        "status_code": lookup.status_code,
+        "websocket_started": False,
+        "writes_ledger": order_update_sequence is not None,
+    }
+    normalized = normalize_json(payload)
+    if not isinstance(normalized, dict):
+        raise TypeError("operator order lookup payload must normalize to an object")
     return normalized
 
 
@@ -152,6 +253,64 @@ def operator_canary_evidence_payload(
     normalized = normalize_json(payload)
     if not isinstance(normalized, dict):
         raise TypeError("operator canary evidence payload must normalize to an object")
+    return normalized
+
+
+def record_operator_canary_evidence_result(
+    config: CoinbaseApplicationConfig,
+    payload: dict[str, JsonValue],
+) -> AuditRecord:
+    record_payload = operator_canary_evidence_result_record_payload(config, payload)
+    return AuditCore(AuditLedger(config.ledger_path)).emit(
+        EventType.OPERATOR_CANARY_EVIDENCE_RESULT,
+        record_payload,
+    )
+
+
+def operator_canary_evidence_result_record_payload(
+    config: CoinbaseApplicationConfig,
+    payload: dict[str, JsonValue],
+) -> dict[str, JsonValue]:
+    ledger = _payload_dict(payload.get("ledger"))
+    order = _payload_dict(payload.get("order"))
+    place_action = _payload_dict(payload.get("place_action"))
+    issue_names = _issue_names(payload.get("issues"))
+    record_payload = {
+        "action_id": _string_or_none(payload.get("action_id")),
+        "cancel_action_count": _int_or_zero(payload.get("cancel_action_count")),
+        "client_order_id": _string_or_none(payload.get("client_order_id")),
+        "config_fingerprint": application_config_fingerprint(config),
+        "evidence_ledger": {
+            "last_hash": _string_or_none(ledger.get("last_hash")),
+            "next_sequence": _int_or_none(ledger.get("next_sequence")),
+            "record_count": _int_or_zero(ledger.get("record_count")),
+            "verified": ledger.get("verified") is True,
+        },
+        "evidence_read_only": (
+            payload.get("writes_ledger") is False
+            and payload.get("runtime_tasks_started") is False
+            and payload.get("websocket_started") is False
+        ),
+        "exchange_order_id": _string_or_none(payload.get("exchange_order_id")),
+        "fingerprint_algorithm": CONFIG_FINGERPRINT_ALGORITHM,
+        "issue_count": len(issue_names),
+        "issue_names": issue_names,
+        "ledger_path": config.ledger_path.as_posix(),
+        "logical_order_id": _string_or_none(payload.get("logical_order_id")),
+        "open_order_count": _int_or_zero(payload.get("open_order_count")),
+        "order_endpoint_called": False,
+        "order_lifecycle_status": _string_or_none(order.get("lifecycle_status")),
+        "place_action_status": _string_or_none(place_action.get("status")),
+        "product_id": _string_or_none(payload.get("product_id")),
+        "recording_writes_ledger": True,
+        "runtime_tasks_started": False,
+        "schema_version": OPERATOR_CANARY_EVIDENCE_RESULT_SCHEMA_VERSION,
+        "status": _string_or_none(payload.get("status")),
+        "websocket_started": False,
+    }
+    normalized = normalize_json(record_payload)
+    if not isinstance(normalized, dict):
+        raise TypeError("operator canary evidence result payload must normalize to an object")
     return normalized
 
 
@@ -806,6 +965,41 @@ def _unique_canary_issues(
 
 def _operator_requested_by(operator_id: str) -> str:
     return f"{OPERATOR_REQUESTED_BY_PREFIX}{operator_id}"
+
+
+def _payload_dict(value: JsonValue) -> dict[str, JsonValue]:
+    normalized = normalize_json(value)
+    return normalized if isinstance(normalized, dict) else {}
+
+
+def _int_or_none(value: JsonValue) -> int | None:
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value
+    return None
+
+
+def _int_or_zero(value: JsonValue) -> int:
+    parsed = _int_or_none(value)
+    return parsed if parsed is not None and parsed >= 0 else 0
+
+
+def _string_or_none(value: JsonValue) -> str | None:
+    return value if isinstance(value, str) and value else None
+
+
+def _issue_names(value: JsonValue) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    issue_names: list[str] = []
+    for item in value:
+        if not isinstance(item, dict):
+            continue
+        issue = item.get("issue")
+        if isinstance(issue, str) and issue:
+            issue_names.append(issue)
+    return issue_names
 
 
 def _default_cancel_action_id(

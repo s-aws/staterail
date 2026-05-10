@@ -1,8 +1,12 @@
 from __future__ import annotations
 
+import argparse
+import asyncio
+import json
 from datetime import datetime, timezone
 from pathlib import Path
 
+from app.main import ATTENTION_REQUIRED_EXIT_CODE, run_from_args
 from core.enums import (
     ExecutionMode,
     OperatorPolicyVenue,
@@ -11,8 +15,16 @@ from core.enums import (
     ProductVenue,
     StrategyHelperStatus,
     TimeInForce,
+    VenueCapabilityRequirement,
+    VenueContractRequirementSet,
 )
-from products.capabilities import product_capabilities, venue_capabilities
+from products.capabilities import (
+    CFM_LIVE_ORDER_ROUTING_REQUIREMENTS,
+    LIVE_ORDER_ROUTING_REQUIREMENTS,
+    product_capabilities,
+    venue_capabilities,
+    venue_contract_report,
+)
 from products.catalog import ProductCatalog, ProductMetadata
 from projections.state import SourceOfTruthProjection
 from strategies import StrategySnapshot
@@ -100,6 +112,36 @@ def test_product_capabilities_apply_product_metadata_to_venue_contract():
     assert no_catalog.reason == "product_catalog_missing"
 
 
+def test_venue_contract_report_checks_required_capabilities():
+    spot = venue_contract_report(ProductVenue.CBE)
+    cfm = venue_contract_report(
+        OperatorPolicyVenue.COINBASE_CFM,
+        requirements=CFM_LIVE_ORDER_ROUTING_REQUIREMENTS,
+    )
+    intx = venue_contract_report(ProductVenue.INTX)
+    metadata_only = venue_contract_report(
+        ProductVenue.INTX,
+        requirements=(VenueCapabilityRequirement.PRODUCT_METADATA_LOOKUP,),
+    )
+
+    assert spot.is_ok
+    assert spot.missing_requirements == ()
+    assert [check.requirement for check in spot.checks] == list(LIVE_ORDER_ROUTING_REQUIREMENTS)
+    assert cfm.is_ok
+    assert cfm.missing_requirements == ()
+    assert intx.status == StrategyHelperStatus.MISSING
+    assert VenueCapabilityRequirement.PRODUCT_METADATA_LOOKUP not in intx.missing_requirements
+    assert VenueCapabilityRequirement.LIVE_EXECUTION in intx.missing_requirements
+    assert metadata_only.is_ok
+    assert metadata_only.missing_requirements == ()
+    assert metadata_only.to_payload()["checks"] == [
+        {
+            "requirement": VenueCapabilityRequirement.PRODUCT_METADATA_LOOKUP.value,
+            "supported": True,
+        }
+    ]
+
+
 def test_strategy_snapshot_exposes_venue_and_product_capabilities():
     catalog = ProductCatalog(
         (
@@ -122,3 +164,47 @@ def test_strategy_snapshot_exposes_venue_and_product_capabilities():
     assert snapshot.venue_capabilities(ProductVenue.CBE).supports_post_only is True
     assert snapshot.product_capabilities("BTC-USD").supports_market_orders is True
     assert snapshot.product_capabilities("UNKNOWN-USD").status == StrategyHelperStatus.MISSING
+
+
+def test_cli_venue_contract_report_prints_cfm_contract(capsys):
+    exit_code = asyncio.run(
+        run_from_args(
+            argparse.Namespace(
+                venue_contract_fail_on_missing=True,
+                venue_contract_report=True,
+                venue_contract_requirement_set=VenueContractRequirementSet.CFM_LIVE_ORDER_ROUTING.value,
+                venue_contract_venue=OperatorPolicyVenue.COINBASE_CFM.value,
+            )
+        )
+    )
+    payload = json.loads(capsys.readouterr().out)
+
+    assert exit_code == 0
+    assert payload["status"] == StrategyHelperStatus.OK.value
+    assert payload["read_only"] is True
+    assert payload["writes_ledger"] is False
+    assert payload["requirement_set"] == VenueContractRequirementSet.CFM_LIVE_ORDER_ROUTING.value
+    assert payload["venue"] == OperatorPolicyVenue.COINBASE_CFM.value
+    assert payload["missing_requirements"] == []
+    assert {
+        "requirement": VenueCapabilityRequirement.POSITION_LOOKUP.value,
+        "supported": True,
+    } in payload["checks"]
+
+
+def test_cli_venue_contract_report_can_fail_on_missing_requirements(capsys):
+    exit_code = asyncio.run(
+        run_from_args(
+            argparse.Namespace(
+                venue_contract_fail_on_missing=True,
+                venue_contract_report=True,
+                venue_contract_requirement_set=VenueContractRequirementSet.LIVE_ORDER_ROUTING.value,
+                venue_contract_venue=ProductVenue.INTX.value,
+            )
+        )
+    )
+    payload = json.loads(capsys.readouterr().out)
+
+    assert exit_code == ATTENTION_REQUIRED_EXIT_CODE
+    assert payload["status"] == StrategyHelperStatus.MISSING.value
+    assert VenueCapabilityRequirement.LIVE_EXECUTION.value in payload["missing_requirements"]

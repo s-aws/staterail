@@ -409,6 +409,8 @@ New venues should be added behind typed adapters:
 
 Current live routing is Coinbase spot and CFM futures. INTX should remain disabled for live routing until separate tests and eligibility assumptions are documented.
 
+Use `venue_contract_report()` before treating a venue as live-capable. The report derives from the existing `VenueCapabilities` source and checks explicit `VenueCapabilityRequirement` values, so future adapters have one capability contract instead of scattered boolean checks. The default live-routing requirements cover metadata lookup, market-data websocket, user-order websocket, place/cancel order support, order/fill/account lookup, and live execution. CFM-style futures can use `CFM_LIVE_ORDER_ROUTING_REQUIREMENTS` when position lookup is also required.
+
 ### Venue Package Boundary
 
 Keep Coinbase in this repository while it is still the first-party reference implementation for venue behavior. The integration should continue to be structured internally as if it could move to an external package later, but it should not be split into a separate repository until the venue/provider contracts are stable.

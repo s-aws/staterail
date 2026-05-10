@@ -53,7 +53,8 @@ Use this order when bringing a real account online:
 13. Run the planned live preflight/gate sequence.
 14. Place one tiny post-only live canary order.
 15. Cancel immediately.
-16. Verify compact canary evidence, exchange-state smoke, source-of-truth replay, and final ledger health.
+16. Look up the venue order status by exchange order ID and record the terminal exchange update.
+17. Verify compact canary evidence, exchange-state smoke, source-of-truth replay, and final ledger health.
 
 Any attention result stops the progression until reviewed.
 
@@ -66,12 +67,16 @@ Use a separate dry-run canary config. Prefer rendering it from the live config w
 The current operator command surface includes:
 
 ```powershell
+python -m app.main --venue-contract-report --venue-contract-venue coinbase_cfm --venue-contract-requirement-set cfm_live_order_routing --venue-contract-fail-on-missing
 python -m app.main --config-file config.local.json --operator-canary-render-dry-run-config --operator-canary-dry-run-config-file config.canary-dry-run.local.json --operator-canary-dry-run-ledger-path data/canary-dry-run-audit.local.jsonl --operator-canary-dry-run-config-force
 python -m app.main --config-file config.local.json --operator-canary-plan --operator-canary-dry-run-config-file config.canary-dry-run.local.json --operator-id "$env:USERNAME" --operator-place-product-id "<product-id>" --operator-place-side buy --operator-place-size "1" --operator-place-limit-price "<limit-price>" --operator-place-leverage "1" --operator-place-order-type limit --operator-place-time-in-force good_until_cancelled --operator-place-post-only --operator-place-reason "first operator canary"
 python -m app.main --config-file config.canary-dry-run.local.json --operator-place-order --operator-id "$env:USERNAME" --operator-place-product-id "<product-id>" --operator-place-side buy --operator-place-size "1" --operator-place-limit-price "<limit-price>" --operator-place-leverage "1" --operator-place-order-type limit --operator-place-time-in-force good_until_cancelled --operator-place-post-only --operator-place-reason "first operator canary dry run"
 python -m app.main --config-file config.canary-dry-run.local.json --operator-cancel-all-open-orders --operator-id "$env:USERNAME" --operator-cancel-product-id "<product-id>" --operator-cancel-action-id-prefix "operator-canary-dry-run-cancel" --operator-cancel-reason "first operator canary dry-run cleanup"
 python -m app.main --config-file config.local.json --operator-open-orders
 python -m app.main --config-file config.local.json --operator-cancel-order --operator-id "$env:USERNAME" --operator-cancel-exchange-order-id "<exchange-order-id>" --operator-cancel-reason "operator cleanup"
-python -m app.main --config-file config.local.json --operator-canary-evidence --operator-canary-evidence-exchange-order-id "<exchange-order-id>" --operator-canary-evidence-product-id "<product-id>" --operator-canary-evidence-fail-on-attention
+python -m app.main --config-file config.local.json --operator-lookup-order --operator-id "$env:USERNAME" --operator-lookup-exchange-order-id "<exchange-order-id>" --operator-lookup-reason "operator venue status verification"
+python -m app.main --config-file config.local.json --operator-canary-evidence --operator-canary-evidence-exchange-order-id "<exchange-order-id>" --operator-canary-evidence-product-id "<product-id>" --operator-canary-evidence-record-result --operator-canary-evidence-fail-on-attention
 python -m app.main --config-file config.local.json --operator-cancel-all-open-orders --operator-id "$env:USERNAME" --operator-cancel-product-id "<product-id>" --operator-cancel-action-id-prefix "operator-cancel" --operator-cancel-reason "operator cleanup"
 ```
+
+The venue contract report is read-only. It checks the current adapter capability contract, not live exchange state.

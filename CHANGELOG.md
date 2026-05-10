@@ -6,7 +6,22 @@ This changelog starts with the first public StateRail release.
 
 ## Unreleased
 
-No unreleased changes.
+## 0.1.6 - 2026-05-09
+
+### Added
+
+- Added an opt-in operator canary evidence result record so post-canary lifecycle evidence can be appended to the immutable ledger after live cleanup.
+- Added venue contract reports that evaluate required live-routing capabilities from the existing venue capability source.
+- Added an audited operator order lookup command that records direct venue order status as an exchange order update.
+- Added a read-only venue contract report CLI for checking adapter capability requirements without running runtime tasks or writing to the ledger.
+
+### Changed
+
+- Updated the controlled canary operator flow so terminal venue order lookup is documented before compact evidence review.
+
+### Fixed
+
+- Fixed canary plan metadata so evidence-recording steps are marked as ledger-writing steps.
 
 ## 0.1.5 - 2026-05-09
 

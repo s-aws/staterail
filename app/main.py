@@ -45,8 +45,10 @@ from app.operator_actions import (
     operator_cancel_all_open_orders_payload,
     operator_cancel_order_payload,
     operator_canary_evidence_payload,
+    operator_lookup_order_payload,
     operator_open_orders_payload,
     operator_place_order_payload,
+    record_operator_canary_evidence_result,
 )
 from app.operator_canary import (
     operator_canary_plan_payload,
@@ -57,6 +59,7 @@ from app.strategy_simulation_gate import (
     record_strategy_simulation_result,
 )
 from app.strategy_simulation import strategy_simulation_payload
+from app.venue_contract import venue_contract_report_payload
 from audit.anchors import LedgerAnchorReceipt, LedgerAnchorStore, publish_recorded_ledger_checkpoint_anchor
 from audit.archives import LedgerArchiveReceipt, LedgerArchiveStore, publish_ledger_archive
 from audit.checkpoints import latest_recorded_ledger_checkpoint, record_ledger_checkpoint
@@ -86,7 +89,9 @@ from core.enums import (
     ReadinessStatus,
     RuntimeTask,
     StrategySimulationStatus,
+    StrategyHelperStatus,
     TimeInForce,
+    VenueContractRequirementSet,
 )
 from core.errors import exception_to_error_payload
 from core.errors import ConfigError
@@ -234,6 +239,27 @@ def parse_args() -> argparse.Namespace:
         help="Verify the ledger and print the replayed source-of-truth projection without running the bot.",
     )
     parser.add_argument(
+        "--venue-contract-report",
+        action="store_true",
+        help="Print a read-only venue capability contract report without running the bot.",
+    )
+    parser.add_argument(
+        "--venue-contract-venue",
+        default=None,
+        help="Venue to inspect with --venue-contract-report, such as CBE, FCM, INTX, or coinbase_cfm.",
+    )
+    parser.add_argument(
+        "--venue-contract-requirement-set",
+        choices=[requirement_set.value for requirement_set in VenueContractRequirementSet],
+        default=VenueContractRequirementSet.LIVE_ORDER_ROUTING.value,
+        help="Requirement set to check with --venue-contract-report.",
+    )
+    parser.add_argument(
+        "--venue-contract-fail-on-missing",
+        action="store_true",
+        help="Return a non-zero exit code when the venue contract report is not ok.",
+    )
+    parser.add_argument(
         "--strategy-simulate",
         action="store_true",
         help="Verify the ledger and run configured strategies in read-only simulation mode.",
@@ -278,6 +304,24 @@ def parse_args() -> argparse.Namespace:
         help="Optional product filter for --operator-open-orders.",
     )
     parser.add_argument(
+        "--operator-lookup-order",
+        action="store_true",
+        help=(
+            "Look up one exchange order directly through the configured venue lookup client "
+            "and record the returned exchange order update in the ledger."
+        ),
+    )
+    parser.add_argument(
+        "--operator-lookup-exchange-order-id",
+        default=None,
+        help="Exchange order ID to inspect with --operator-lookup-order.",
+    )
+    parser.add_argument(
+        "--operator-lookup-reason",
+        default=None,
+        help="Operator reason recorded with --operator-lookup-order.",
+    )
+    parser.add_argument(
         "--operator-canary-plan",
         action="store_true",
         help=(
@@ -320,6 +364,14 @@ def parse_args() -> argparse.Namespace:
         "--operator-canary-evidence-fail-on-attention",
         action="store_true",
         help="Return a non-zero exit code when post-canary evidence requires attention.",
+    )
+    parser.add_argument(
+        "--operator-canary-evidence-record-result",
+        action="store_true",
+        help=(
+            "Append the compact post-canary evidence result to the audit ledger. "
+            "Without this flag, --operator-canary-evidence remains read-only."
+        ),
     )
     parser.add_argument(
         "--operator-canary-render-dry-run-config",
@@ -662,9 +714,16 @@ async def run_from_args(
     operator_cancel_all_open_orders_requested = getattr(args, "operator_cancel_all_open_orders", False)
     operator_cancel_order_requested = getattr(args, "operator_cancel_order", False)
     operator_canary_evidence_requested = getattr(args, "operator_canary_evidence", False)
+    operator_canary_evidence_record_requested = getattr(
+        args,
+        "operator_canary_evidence_record_result",
+        False,
+    )
     operator_canary_plan_requested = getattr(args, "operator_canary_plan", False)
     operator_canary_render_requested = getattr(args, "operator_canary_render_dry_run_config", False)
+    operator_lookup_order_requested = getattr(args, "operator_lookup_order", False)
     operator_place_order_requested = getattr(args, "operator_place_order", False)
+    venue_contract_report_requested = getattr(args, "venue_contract_report", False)
     strategy_scenario_file = getattr(args, "strategy_scenario_file", None)
     strategy_scenario_requested = strategy_scenario_file is not None
     product_catalog_smoke_requested = getattr(args, "product_catalog_smoke", False)
@@ -686,6 +745,10 @@ async def run_from_args(
             )
     if strategy_simulate_record_result_requested and not getattr(args, "strategy_simulate", False):
         raise ValueError("--strategy-simulate-record-result requires --strategy-simulate")
+    if operator_canary_evidence_record_requested and not operator_canary_evidence_requested:
+        raise ValueError(
+            "--operator-canary-evidence-record-result requires --operator-canary-evidence"
+        )
     if strategy_scenario_requested and getattr(args, "ledger_path", None) is None:
         raise ValueError("--ledger-path is required with --strategy-scenario-file")
     if operator_cancel_order_requested and operator_cancel_all_open_orders_requested:
@@ -709,6 +772,7 @@ async def run_from_args(
             or operator_cancel_order_requested
             or operator_cancel_all_open_orders_requested
             or operator_canary_evidence_requested
+            or operator_lookup_order_requested
             or getattr(args, "operator_open_orders", False)
         ):
             raise ValueError(
@@ -734,9 +798,16 @@ async def run_from_args(
         or operator_cancel_order_requested
         or operator_cancel_all_open_orders_requested
     )
+    if operator_lookup_order_requested:
+        if not getattr(args, "operator_id", None):
+            raise ValueError("--operator-id is required with --operator-lookup-order")
+        _require_cli_value(args, "operator_lookup_exchange_order_id", "--operator-lookup-exchange-order-id")
+        _require_cli_value(args, "operator_lookup_reason", "--operator-lookup-reason")
     if operator_write_requested:
         if not getattr(args, "operator_id", None):
             raise ValueError("--operator-id is required with operator write commands")
+    if venue_contract_report_requested:
+        _require_cli_value(args, "venue_contract_venue", "--venue-contract-venue")
     if operator_place_order_requested:
         _require_cli_value(args, "operator_place_product_id", "--operator-place-product-id")
         _require_cli_value(args, "operator_place_side", "--operator-place-side")
@@ -779,6 +850,7 @@ async def run_from_args(
         "--readiness": readiness_requested,
         "--source-of-truth": getattr(args, "source_of_truth", False),
         "--strategy-simulate": getattr(args, "strategy_simulate", False),
+        "--venue-contract-report": venue_contract_report_requested,
     }
     enabled_read_only_commands = [
         command for command, enabled in read_only_commands.items() if enabled
@@ -832,6 +904,7 @@ async def run_from_args(
     if operator_write_requested and (
         enabled_read_only_commands
         or strategy_scenario_requested
+        or operator_lookup_order_requested
         or getattr(args, "ledger_checkpoint", False)
         or ledger_health_acknowledge_requested
         or anchor_latest_checkpoint_requested
@@ -844,6 +917,23 @@ async def run_from_args(
     ):
         raise ValueError(
             "operator write commands cannot be combined with read-only, scenario, smoke, "
+            "preflight, checkpoint, acknowledgement, anchor, or archive commands"
+        )
+    if operator_lookup_order_requested and (
+        enabled_read_only_commands
+        or strategy_scenario_requested
+        or getattr(args, "ledger_checkpoint", False)
+        or ledger_health_acknowledge_requested
+        or anchor_latest_checkpoint_requested
+        or anchor_requested
+        or archive_requested
+        or product_catalog_smoke_requested
+        or feed_smoke_requested
+        or exchange_state_smoke_requested
+        or live_no_order_preflight_requested
+    ):
+        raise ValueError(
+            "--operator-lookup-order cannot be combined with read-only, scenario, smoke, "
             "preflight, checkpoint, acknowledgement, anchor, or archive commands"
         )
     if product_catalog_smoke_requested and (
@@ -1027,6 +1117,22 @@ async def run_from_args(
         print(json.dumps(source_of_truth_payload(config.ledger_path), indent=2, sort_keys=True))
         return 0
 
+    if venue_contract_report_requested:
+        payload = venue_contract_report_payload(
+            getattr(args, "venue_contract_venue"),
+            requirement_set=_enum_value(
+                VenueContractRequirementSet,
+                getattr(args, "venue_contract_requirement_set"),
+                "--venue-contract-requirement-set",
+            ),
+        )
+        print(json.dumps(payload, indent=2, sort_keys=True))
+        return _report_exit_code(
+            payload,
+            fail_on_attention=getattr(args, "venue_contract_fail_on_missing", False),
+            ok_status=StrategyHelperStatus.OK.value,
+        )
+
     if operator_canary_plan_requested:
         dry_run_config = load_coinbase_application_config_from_json_file(
             Path(getattr(args, "operator_canary_dry_run_config_file"))
@@ -1088,6 +1194,12 @@ async def run_from_args(
             ),
             product_id=getattr(args, "operator_canary_evidence_product_id", None),
         )
+        if operator_canary_evidence_record_requested:
+            record = record_operator_canary_evidence_result(config, payload)
+            payload["operator_canary_evidence_result_sequence"] = record.sequence
+            payload["writes_ledger"] = True
+        else:
+            payload["operator_canary_evidence_result_sequence"] = None
         print(json.dumps(payload, indent=2, sort_keys=True))
         return _report_exit_code(
             payload,
@@ -1221,6 +1333,34 @@ async def run_from_args(
         return _report_exit_code(
             payload,
             fail_on_attention=getattr(args, "live_no_order_preflight_fail_on_attention", False),
+            ok_status=ReadinessStatus.OK.value,
+        )
+
+    if operator_lookup_order_requested:
+        try:
+            credentials = load_coinbase_runtime_credentials_from_env()
+        except Exception as exc:
+            _audit_runtime_preflight_error(config.ledger_path, exc)
+            raise
+        application = build_coinbase_application(
+            config,
+            jwt_factory=credentials.jwt_factory,
+            s3_anchor_store_factory=s3_anchor_store_factory,
+            s3_archive_store_factory=s3_archive_store_factory,
+            token_provider=credentials.token_provider,
+            transport=transport,
+        )
+        payload = operator_lookup_order_payload(
+            config,
+            application,
+            exchange_order_id=getattr(args, "operator_lookup_exchange_order_id"),
+            operator_id=getattr(args, "operator_id"),
+            reason=getattr(args, "operator_lookup_reason"),
+        )
+        print(json.dumps(payload, indent=2, sort_keys=True))
+        return _report_exit_code(
+            payload,
+            fail_on_attention=True,
             ok_status=ReadinessStatus.OK.value,
         )
 
@@ -1468,7 +1608,7 @@ def _config_from_args(args: argparse.Namespace) -> CoinbaseApplicationConfig:
 def _require_cli_value(args: argparse.Namespace, attribute: str, option_name: str) -> None:
     value = getattr(args, attribute, None)
     if value is None or value == "":
-        raise ValueError(f"{option_name} is required with --operator-place-order")
+        raise ValueError(f"{option_name} is required")
 
 
 def _enum_value(enum_type, value: str, option_name: str):

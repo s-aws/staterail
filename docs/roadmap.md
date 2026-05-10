@@ -22,7 +22,7 @@ Use the audited operator command surface as the repeatable first-live-order work
 - Generate a read-only canary plan that checks the dry-run/live configs and prints the exact operator command sequence.
 - Dry-run one explicit post-only limit order through the gateway and risk gate, then clean it up.
 - Run the same command live only after readiness, no-order preflight, simulation qualification when strategies are enabled, and live runtime gate are clean.
-- Immediately inspect open orders, cancel the canary, replay compact canary evidence, replay source-of-truth state, run ledger health, and record recovery evidence.
+- Immediately inspect open orders, cancel the canary, look up the terminal venue order status, replay compact canary evidence, replay source-of-truth state, run ledger health, and record recovery evidence.
 - Keep the canary product scope small and Coinbase spot/CFM-focused until the venue contract has more live evidence.
 
 ### Strategy Helper Surface
@@ -58,6 +58,7 @@ Keep Coinbase as the reference live adapter until the venue contract is stable. 
 - Market data normalization and duplicate suppression.
 - Account/order/fill reconciliation.
 - Replay and health-check visibility.
+- A passing `venue_contract_report()` for the capability requirements needed by the intended live scope.
 
 ### Order Management Policies
 

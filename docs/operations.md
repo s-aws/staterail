@@ -330,10 +330,16 @@ python -m app.main --config-file config.local.json --operator-place-order --oper
 Use a product allowed by the local risk policy and avoid BTC futures/perpetual products for the initial Coinbase operator test scope. After a live canary, immediately inspect tracked open orders, cancel the canary if it remains open, replay compact canary evidence, replay the full source-of-truth projection when needed, and run ledger health.
 
 ```powershell
-python -m app.main --config-file config.local.json --operator-canary-evidence --operator-canary-evidence-exchange-order-id "REPLACE_WITH_EXCHANGE_ORDER_ID" --operator-canary-evidence-product-id "SHB-26JUN26-CDE" --operator-canary-evidence-fail-on-attention
+python -m app.main --config-file config.local.json --operator-canary-evidence --operator-canary-evidence-exchange-order-id "REPLACE_WITH_EXCHANGE_ORDER_ID" --operator-canary-evidence-product-id "SHB-26JUN26-CDE" --operator-canary-evidence-record-result --operator-canary-evidence-fail-on-attention
 ```
 
-The evidence command is read-only. It verifies the ledger, finds the matching place-order lifecycle, reports the place action, cancel actions, order identifiers, lifecycle status, and remaining open orders for the product. It returns attention when the order is still open, filled, missing cancellation evidence, or any open order remains for the same product.
+The evidence command is read-only unless `--operator-canary-evidence-record-result` is supplied. It verifies the ledger, finds the matching place-order lifecycle, reports the place action, cancel actions, order identifiers, lifecycle status, and remaining open orders for the product. The record flag appends that compact evidence result to the audit ledger. The command returns attention when the order is still open, filled, missing cancellation evidence, or any open order remains for the same product.
+
+To verify the venue's latest order status directly, use the operator lookup command after cancel. It calls the configured venue order lookup client, records the returned `exchange.order_update` in the ledger when found, and does not submit, amend, or cancel orders.
+
+```powershell
+python -m app.main --config-file config.local.json --operator-lookup-order --operator-id "$env:USERNAME" --operator-lookup-exchange-order-id "REPLACE_WITH_EXCHANGE_ORDER_ID" --operator-lookup-reason "Operator post-cancel venue verification"
+```
 
 ## Audited Operator Cancel
 

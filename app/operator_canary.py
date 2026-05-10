@@ -599,6 +599,23 @@ def _steps(
             writes_ledger=True,
         ),
         _step(
+            OperatorCanaryPlanStep.LIVE_LOOKUP_ORDER,
+            _argv(
+                live_config_file,
+                "--operator-lookup-order",
+                "--operator-id",
+                operator_id,
+                "--operator-lookup-exchange-order-id",
+                EXCHANGE_ORDER_ID_PLACEHOLDER,
+                "--operator-lookup-reason",
+                f"{reason} live venue lookup",
+            ),
+            calls_order_endpoint=True,
+            description="Read the live venue order status and record the returned exchange update.",
+            live_order_endpoint=True,
+            writes_ledger=True,
+        ),
+        _step(
             OperatorCanaryPlanStep.LIVE_CANARY_EVIDENCE,
             _argv(
                 live_config_file,
@@ -607,9 +624,11 @@ def _steps(
                 EXCHANGE_ORDER_ID_PLACEHOLDER,
                 "--operator-canary-evidence-product-id",
                 product_id,
+                "--operator-canary-evidence-record-result",
                 "--operator-canary-evidence-fail-on-attention",
             ),
             description="Replay compact post-canary evidence after live cleanup.",
+            writes_ledger=True,
         ),
         _step(
             OperatorCanaryPlanStep.SOURCE_OF_TRUTH,
