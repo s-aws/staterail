@@ -79,4 +79,9 @@ python -m app.main --config-file config.local.json --operator-canary-evidence --
 python -m app.main --config-file config.local.json --operator-cancel-all-open-orders --operator-id "$env:USERNAME" --operator-cancel-product-id "<product-id>" --operator-cancel-action-id-prefix "operator-cancel" --operator-cancel-reason "operator cleanup"
 ```
 
-The venue contract report is read-only. It checks the current adapter capability contract, not live exchange state.
+The venue contract report is read-only. It checks the current adapter capability contract, not live exchange state. The live-routing requirement set includes the safe canary order shape: limit orders, post-only, and good-til-cancelled time-in-force.
+
+Canary plan steps distinguish live order endpoint access from exchange-state mutation. Placement
+and cancellation steps mutate exchange order state. The terminal lookup step calls the venue order
+lookup endpoint and may append the returned exchange update to the ledger, but it does not place,
+amend, or cancel an order.

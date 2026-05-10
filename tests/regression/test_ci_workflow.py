@@ -13,5 +13,12 @@ def test_regression_workflow_uses_windows_and_read_only_permissions():
     assert 'python-version: "3.13"' in workflow
     assert 'python -m pip install -e ".[dev]"' in workflow
     assert "pytest tests/regression/ -v" in workflow
+    assert "python -m pip wheel . --no-deps --wheel-dir dist\\wheelhouse" in workflow
+    assert "python -m venv .package-smoke-venv" in workflow
+    assert "pip install --no-index --find-links dist\\wheelhouse staterail" in workflow
+    assert "staterail.exe --help" in workflow
+    assert "staterail-config-template.exe --help" in workflow
+    assert "staterail-config-wizard.exe --help" in workflow
+    assert "staterail-strategy-wizard.exe --help" in workflow
     assert "upload-artifact" not in workflow
     assert "release-validation" not in workflow

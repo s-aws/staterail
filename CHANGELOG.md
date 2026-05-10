@@ -6,6 +6,18 @@ This changelog starts with the first public StateRail release.
 
 ## Unreleased
 
+## 0.1.7 - 2026-05-09
+
+### Added
+
+- Added a deterministic split-order helper that emits an explicit cancel intent followed by child placement intents through the normal gateway path.
+- Added public-compatible CI wheel build and installed-console-script smoke checks.
+
+### Changed
+
+- Tightened venue contract reports so live-routing requirements assert limit-order, post-only, and good-til-cancelled support in addition to generic live order routing.
+- Clarified operator canary and order-lookup payloads so read-only venue lookups are distinguishable from order-mutating endpoint calls.
+
 ## 0.1.6 - 2026-05-09
 
 ### Added

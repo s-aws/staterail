@@ -517,6 +517,7 @@ def _steps(
             calls_order_endpoint=True,
             description="Submit the canary intent through the dry-run gateway and executor.",
             live_order_endpoint=False,
+            mutates_exchange_order_state=True,
             writes_ledger=True,
         ),
         _step(
@@ -539,6 +540,7 @@ def _steps(
             calls_order_endpoint=True,
             description="Clean up any tracked dry-run canary order before live testing.",
             live_order_endpoint=False,
+            mutates_exchange_order_state=True,
             writes_ledger=True,
         ),
         _step(
@@ -574,6 +576,7 @@ def _steps(
             calls_order_endpoint=True,
             description="Submit exactly one live post-only canary order.",
             live_order_endpoint=True,
+            mutates_exchange_order_state=True,
             writes_ledger=True,
         ),
         _step(
@@ -596,6 +599,7 @@ def _steps(
             calls_order_endpoint=True,
             description="Cancel the live canary by exchange order ID from the live placement receipt.",
             live_order_endpoint=True,
+            mutates_exchange_order_state=True,
             writes_ledger=True,
         ),
         _step(
@@ -613,6 +617,7 @@ def _steps(
             calls_order_endpoint=True,
             description="Read the live venue order status and record the returned exchange update.",
             live_order_endpoint=True,
+            mutates_exchange_order_state=False,
             writes_ledger=True,
         ),
         _step(
@@ -720,6 +725,7 @@ def _step(
     calls_order_endpoint: bool = False,
     description: str,
     live_order_endpoint: bool = False,
+    mutates_exchange_order_state: bool = False,
     writes_ledger: bool = False,
 ) -> dict[str, JsonValue]:
     payload = {
@@ -727,6 +733,7 @@ def _step(
         "calls_order_endpoint": calls_order_endpoint,
         "description": description,
         "live_order_endpoint": live_order_endpoint,
+        "mutates_exchange_order_state": mutates_exchange_order_state,
         "step": step.value,
         "stop_on_attention": True,
         "writes_ledger": writes_ledger,

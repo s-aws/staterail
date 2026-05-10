@@ -28,3 +28,17 @@ jobs:
 
       - name: Run regression tests
         run: pytest tests/regression/ -v
+
+      - name: Build wheel
+        run: python -m pip wheel . --no-deps --wheel-dir dist\wheelhouse
+
+      - name: Smoke installed wheel
+        shell: pwsh
+        run: |
+          python -m venv .package-smoke-venv
+          .\.package-smoke-venv\Scripts\python -m pip install --no-index --find-links dist\wheelhouse staterail
+          .\.package-smoke-venv\Scripts\python -c "import actions, app, audit, config, core, exchanges, feeds, hooks, orders, products, projections, reconciliation, risk, runtime, strategies, tools, triggers"
+          .\.package-smoke-venv\Scripts\staterail.exe --help
+          .\.package-smoke-venv\Scripts\staterail-config-template.exe --help
+          .\.package-smoke-venv\Scripts\staterail-config-wizard.exe --help
+          .\.package-smoke-venv\Scripts\staterail-strategy-wizard.exe --help

@@ -106,6 +106,7 @@ def operator_lookup_order_payload(
             "ledger_path": Path(config.ledger_path).as_posix(),
             "lookup_status": ExchangeLookupStatus.FAILED.value,
             "operator_id": operator_id,
+            "order_mutation_endpoint_called": False,
             "order_endpoint_called": False,
             "order_update": None,
             "order_update_sequence": None,
@@ -114,6 +115,7 @@ def operator_lookup_order_payload(
             "schema_version": OPERATOR_ORDER_LOOKUP_SCHEMA_VERSION,
             "status": ReadinessStatus.ATTENTION_REQUIRED.value,
             "status_code": None,
+            "venue_order_lookup_called": False,
             "websocket_started": False,
             "writes_ledger": False,
         }
@@ -150,6 +152,7 @@ def operator_lookup_order_payload(
         "ledger_path": Path(config.ledger_path).as_posix(),
         "lookup_status": lookup.status.value,
         "operator_id": operator_id,
+        "order_mutation_endpoint_called": False,
         "order_endpoint_called": False,
         "order_update": order_update if order_update else None,
         "order_update_sequence": order_update_sequence,
@@ -164,6 +167,7 @@ def operator_lookup_order_payload(
             else ReadinessStatus.ATTENTION_REQUIRED.value
         ),
         "status_code": lookup.status_code,
+        "venue_order_lookup_called": True,
         "websocket_started": False,
         "writes_ledger": order_update_sequence is not None,
     }

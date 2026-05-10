@@ -30,6 +30,7 @@ from core.enums import (
     MarketDataKind,
     OperatorPolicyDistanceType,
     OperatorPolicyFollowupSizeMode,
+    OperatorPolicyLineageModel,
     OperatorPolicyPermission,
     OperatorPolicyVenue,
     OrderLifecycleStatus,
@@ -57,7 +58,7 @@ from products.capabilities import (
     product_capabilities as catalog_product_capabilities,
     venue_capabilities as normalized_venue_capabilities,
 )
-from projections.state import OrderSnapshot, SourceOfTruthProjection
+from projections.state import LogicalOrderSnapshot, OrderSnapshot, SourceOfTruthProjection
 from strategies.exposure import (
     OrderCapacity,
     ProductExposure,
@@ -1679,6 +1680,223 @@ def strategy_release_staged_placement_intent(
     )
 
 
+def strategy_split_order_intents(
+    strategy_id: str,
+    purpose: str,
+    snapshot: StrategySnapshot,
+    source_logical_order_id: str,
+    child_count: int,
+    *parts: Any,
+    limit_price: Any | None = None,
+    placement_kind: OrderPlacementKind | None = None,
+) -> tuple[StrategyIntent, ...]:
+    if not isinstance(snapshot, StrategySnapshot):
+        raise TypeError("snapshot must be a StrategySnapshot")
+    if not isinstance(source_logical_order_id, str) or not source_logical_order_id:
+        raise ValueError("source_logical_order_id must be a non-empty string")
+    if placement_kind is not None and not isinstance(placement_kind, OrderPlacementKind):
+        raise TypeError("placement_kind must be an OrderPlacementKind when provided")
+    if placement_kind not in {None, OrderPlacementKind.INITIAL, OrderPlacementKind.STAGED_RELEASE}:
+        raise StrategyContractError(
+            "split child placements support only initial or staged_release placement",
+            context={
+                "placement_kind": placement_kind.value if placement_kind is not None else None,
+                "source_logical_order_id": source_logical_order_id,
+            },
+        )
+
+    policy = snapshot.operator_policy
+    if policy is None:
+        raise StrategyContractError(
+            "operator policy is required to create split-order intents",
+            context={"source_logical_order_id": source_logical_order_id},
+        )
+    if policy.lineage.split_orders != OperatorPolicyPermission.ALLOWED:
+        raise StrategyContractError(
+            "operator policy does not allow split lineage",
+            context={"source_logical_order_id": source_logical_order_id},
+        )
+    if policy.order_behavior.default_order_type != OrderType.LIMIT:
+        raise StrategyContractError(
+            "split-order intents require limit order behavior",
+            context={
+                "default_order_type": policy.order_behavior.default_order_type.value,
+                "source_logical_order_id": source_logical_order_id,
+            },
+        )
+    if snapshot.product_catalog is None:
+        raise StrategyInputUnavailableError(
+            "product catalog is required to create split-order intents",
+            context={"source_logical_order_id": source_logical_order_id},
+        )
+
+    source_logical_order = snapshot.projection.logical_orders_by_id.get(source_logical_order_id)
+    if source_logical_order is None:
+        raise StrategyInputUnavailableError(
+            "source logical order is not available in the source-of-truth projection",
+            context={"source_logical_order_id": source_logical_order_id},
+        )
+    if source_logical_order.product_id not in policy.scope.products:
+        raise StrategyContractError(
+            "split source product_id is outside operator policy scope",
+            context={
+                "product_id": source_logical_order.product_id,
+                "source_logical_order_id": source_logical_order_id,
+            },
+        )
+
+    source_order = _split_source_order(snapshot, source_logical_order_id)
+    if source_order.product_id is None or source_order.side is None:
+        raise StrategyInputUnavailableError(
+            "split source order product_id and side are required",
+            context={"source_logical_order_id": source_logical_order_id},
+        )
+    if source_order.product_id != source_logical_order.product_id:
+        raise StrategyContractError(
+            "split source order product_id does not match logical order",
+            context={
+                "logical_order_product_id": source_logical_order.product_id,
+                "source_action_id": source_order.action_id,
+                "source_order_product_id": source_order.product_id,
+                "source_logical_order_id": source_logical_order_id,
+            },
+        )
+    if source_order.side != source_logical_order.side:
+        raise StrategyContractError(
+            "split source order side does not match logical order",
+            context={
+                "logical_order_side": source_logical_order.side.value,
+                "source_action_id": source_order.action_id,
+                "source_order_side": source_order.side.value,
+                "source_logical_order_id": source_logical_order_id,
+            },
+        )
+    if source_logical_order.root_order_id not in snapshot.projection.logical_orders_by_id:
+        raise StrategyInputUnavailableError(
+            "split source root logical order is not available in the source-of-truth projection",
+            context={
+                "root_order_id": source_logical_order.root_order_id,
+                "source_logical_order_id": source_logical_order_id,
+            },
+        )
+    if source_order.size is None:
+        raise StrategyInputUnavailableError(
+            "split source order size is required",
+            context={"source_logical_order_id": source_logical_order_id},
+        )
+
+    resolved_limit_price = _split_limit_price(
+        explicit_limit_price=limit_price,
+        source_logical_order=source_logical_order,
+        source_order=source_order,
+    )
+    try:
+        product = snapshot.product_catalog.require(source_order.product_id)
+    except KeyError as exc:
+        raise StrategyInputUnavailableError(
+            "product metadata is required to create split-order intents",
+            context={
+                "product_id": source_order.product_id,
+                "source_logical_order_id": source_logical_order_id,
+            },
+        ) from exc
+
+    from orders.sizing import LineageSizingPolicy
+
+    decision = LineageSizingPolicy.from_values(product=product).split_sizes(
+        child_count=child_count,
+        limit_price=resolved_limit_price,
+        total_size=source_order.size,
+    )
+    if not decision.accepted:
+        raise StrategyContractError(
+            "split sizing decision rejected",
+            context={
+                "sizing_decision": decision.to_payload(),
+                "source_logical_order_id": source_logical_order_id,
+            },
+        )
+
+    cancel_identity = {
+        "child_count": child_count,
+        "source_action_id": source_order.action_id,
+        "source_logical_order_id": source_logical_order_id,
+    }
+    cancel_purpose = f"{purpose}-split-cancel"
+    cancel_intent = CancelOrderIntent(
+        action_id=strategy_action_id(strategy_id, cancel_purpose, *parts, cancel_identity),
+        client_order_id=source_order.client_order_id,
+        exchange_order_id=source_order.exchange_order_id,
+        idempotency_key=strategy_client_order_id(strategy_id, cancel_purpose, *parts, cancel_identity),
+    )
+    if cancel_intent.action_id in snapshot.projection.actions:
+        raise StrategyContractError(
+            "split cancel action already exists",
+            context={
+                "action_id": cancel_intent.action_id,
+                "source_logical_order_id": source_logical_order_id,
+            },
+        )
+
+    parent_order_id = _lineage_parent_for_child(policy.lineage.model, source_logical_order)
+    child_purpose = f"{purpose}-{OrderLineageRelation.SPLIT_CHILD.value}"
+    child_intents: list[PlaceOrderIntent] = []
+    child_total = len(decision.output_sizes)
+    for index, output_size in enumerate(decision.output_sizes, start=1):
+        child_identity = {
+            "child_count": child_total,
+            "child_index": index,
+            "limit_price": str(decision.limit_price),
+            "placement_kind": placement_kind.value if placement_kind is not None else None,
+            "size": str(output_size),
+            "source_logical_order_id": source_logical_order_id,
+        }
+        action_id = strategy_action_id(strategy_id, child_purpose, *parts, child_identity)
+        if action_id in snapshot.projection.actions:
+            raise StrategyContractError(
+                "split child action already exists",
+                context={"action_id": action_id, "source_logical_order_id": source_logical_order_id},
+            )
+        child_intents.append(
+            PlaceOrderIntent(
+                action_id=action_id,
+                idempotency_key=strategy_client_order_id(
+                    strategy_id,
+                    child_purpose,
+                    *parts,
+                    child_identity,
+                ),
+                limit_price=str(decision.limit_price),
+                lineage_relation=OrderLineageRelation.SPLIT_CHILD,
+                logical_order_id=action_id,
+                metadata={
+                    "split_child": {
+                        "cancel_action_id": cancel_intent.action_id,
+                        "child_count": child_total,
+                        "child_index": index,
+                        "parent_logical_order_id": parent_order_id,
+                        "sizing_decision": decision.to_payload(),
+                        "source_action_id": source_order.action_id,
+                        "source_logical_order_id": source_logical_order_id,
+                    },
+                },
+                order_type=policy.order_behavior.default_order_type,
+                parent_order_id=parent_order_id,
+                placement_kind=placement_kind,
+                post_only=policy.order_behavior.post_only,
+                product_id=source_order.product_id,
+                reduce_only=policy.risk_limits.reduce_only_first,
+                root_order_id=source_logical_order.root_order_id,
+                side=source_order.side,
+                size=str(output_size),
+                source_order_ids=(source_logical_order_id,),
+                time_in_force=policy.order_behavior.time_in_force,
+            )
+        )
+
+    return (cancel_intent, *child_intents)
+
+
 def strategy_followup_after_fill_intent(
     strategy_id: str,
     purpose: str,
@@ -2073,6 +2291,92 @@ def _open_live_action_ids_for_logical_order(
     return tuple(sorted(set(action_ids)))
 
 
+def _split_source_order(
+    snapshot: StrategySnapshot,
+    source_logical_order_id: str,
+) -> OrderSnapshot:
+    live_orders: list[OrderSnapshot] = []
+    for placement in snapshot.projection.placements_for_logical_order(source_logical_order_id):
+        if placement.placement_kind == OrderPlacementKind.STAGED_RELEASE:
+            continue
+        if placement.action_id is None:
+            continue
+        order = snapshot.projection.orders_by_action_id.get(placement.action_id)
+        if order is None or order.lifecycle_status not in _SPLITTABLE_ORDER_STATUSES:
+            continue
+        live_orders.append(order)
+
+    if not live_orders:
+        raise StrategyInputUnavailableError(
+            "split source order has no cancelable live placement",
+            context={"source_logical_order_id": source_logical_order_id},
+        )
+    if len(live_orders) > 1:
+        raise StrategyContractError(
+            "split source logical order has multiple live placements",
+            context={
+                "action_ids": [order.action_id for order in live_orders],
+                "source_logical_order_id": source_logical_order_id,
+            },
+        )
+
+    source_order = live_orders[0]
+    if source_order.exchange_order_id is None and source_order.client_order_id is None:
+        raise StrategyContractError(
+            "split source order is not cancelable",
+            context={
+                "source_action_id": source_order.action_id,
+                "source_logical_order_id": source_logical_order_id,
+            },
+        )
+    if _decimal_or_zero(source_order.filled_size) != Decimal("0"):
+        raise StrategyContractError(
+            "partially filled split source orders are not supported",
+            context={
+                "filled_size": source_order.filled_size,
+                "source_action_id": source_order.action_id,
+                "source_logical_order_id": source_logical_order_id,
+            },
+        )
+    return source_order
+
+
+def _split_limit_price(
+    *,
+    explicit_limit_price: Any | None,
+    source_logical_order: LogicalOrderSnapshot,
+    source_order: OrderSnapshot,
+) -> Decimal:
+    if explicit_limit_price is not None:
+        return _positive_decimal_input(explicit_limit_price, "split.limit_price")
+    if source_order.limit_price is not None:
+        return _positive_decimal_input(source_order.limit_price, "split.limit_price")
+    if source_logical_order.limit_price is not None:
+        return _positive_decimal_input(source_logical_order.limit_price, "split.limit_price")
+    raise StrategyInputUnavailableError(
+        "split limit_price is required when the source order has no limit_price",
+        context={
+            "source_action_id": source_order.action_id,
+            "source_logical_order_id": source_logical_order.logical_order_id,
+        },
+    )
+
+
+def _lineage_parent_for_child(
+    model: OperatorPolicyLineageModel,
+    source_logical_order: LogicalOrderSnapshot,
+) -> str:
+    if model == OperatorPolicyLineageModel.FLAT_ROOT:
+        return source_logical_order.root_order_id
+    raise StrategyContractError(
+        "unsupported operator policy lineage model",
+        context={
+            "lineage_model": model.value,
+            "source_logical_order_id": source_logical_order.logical_order_id,
+        },
+    )
+
+
 def _followup_price(
     value: Any,
     *,
@@ -2178,6 +2482,18 @@ def _positive_decimal_input(value: Any, field_name: str) -> Decimal:
     return parsed
 
 
+def _decimal_or_zero(value: Any) -> Decimal:
+    if value is None:
+        return Decimal("0")
+    try:
+        parsed = Decimal(str(value))
+    except (InvalidOperation, ValueError):
+        return Decimal("0")
+    if not parsed.is_finite():
+        return Decimal("0")
+    return parsed
+
+
 def _scheduled_slice_identity(
     *,
     interval: timedelta,
@@ -2243,6 +2559,13 @@ _LIVE_ORDER_STATUSES = frozenset(
         OrderLifecycleStatus.OPEN,
         OrderLifecycleStatus.PENDING,
         OrderLifecycleStatus.REQUESTED,
+    }
+)
+
+_SPLITTABLE_ORDER_STATUSES = frozenset(
+    {
+        OrderLifecycleStatus.ACCEPTED,
+        OrderLifecycleStatus.OPEN,
     }
 )
 

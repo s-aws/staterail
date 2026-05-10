@@ -353,6 +353,8 @@ def test_cli_operator_lookup_order_records_exchange_update(
     assert payload["lookup_status"] == ExchangeLookupStatus.FOUND.value
     assert payload["writes_ledger"] is True
     assert payload["order_endpoint_called"] is False
+    assert payload["order_mutation_endpoint_called"] is False
+    assert payload["venue_order_lookup_called"] is True
     assert payload["order_update_sequence"] == records[-1].sequence
     assert payload["order_update"]["status"] == ExchangeOrderStatus.CANCELLED.value
     assert records[-1].event_type == EventType.EXCHANGE_ORDER_UPDATE
@@ -997,13 +999,22 @@ def test_cli_operator_canary_plan_outputs_repeatable_sequence_without_writing(
     ]
     assert steps[OperatorCanaryPlanStep.DRY_RUN_PLACE_ORDER.value]["calls_order_endpoint"] is True
     assert steps[OperatorCanaryPlanStep.DRY_RUN_PLACE_ORDER.value]["live_order_endpoint"] is False
+    assert (
+        steps[OperatorCanaryPlanStep.DRY_RUN_PLACE_ORDER.value]["mutates_exchange_order_state"]
+        is True
+    )
     assert steps[OperatorCanaryPlanStep.LIVE_PLACE_ORDER.value]["calls_order_endpoint"] is True
     assert steps[OperatorCanaryPlanStep.LIVE_PLACE_ORDER.value]["live_order_endpoint"] is True
+    assert steps[OperatorCanaryPlanStep.LIVE_PLACE_ORDER.value]["mutates_exchange_order_state"] is True
     assert "--operator-place-order" in steps[OperatorCanaryPlanStep.LIVE_PLACE_ORDER.value]["argv"]
     assert "--operator-cancel-exchange-order-id" in steps[OperatorCanaryPlanStep.LIVE_CANCEL_ORDER.value]["argv"]
     assert "--operator-lookup-exchange-order-id" in steps[OperatorCanaryPlanStep.LIVE_LOOKUP_ORDER.value]["argv"]
     assert "--operator-canary-evidence" in steps[OperatorCanaryPlanStep.LIVE_CANARY_EVIDENCE.value]["argv"]
     assert steps[OperatorCanaryPlanStep.LIVE_LOOKUP_ORDER.value]["writes_ledger"] is True
+    assert (
+        steps[OperatorCanaryPlanStep.LIVE_LOOKUP_ORDER.value]["mutates_exchange_order_state"]
+        is False
+    )
     assert steps[OperatorCanaryPlanStep.LIVE_CANARY_EVIDENCE.value]["writes_ledger"] is True
     assert not live_ledger_path.exists()
     assert not dry_run_ledger_path.exists()

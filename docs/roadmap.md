@@ -23,6 +23,7 @@ Use the audited operator command surface as the repeatable first-live-order work
 - Dry-run one explicit post-only limit order through the gateway and risk gate, then clean it up.
 - Run the same command live only after readiness, no-order preflight, simulation qualification when strategies are enabled, and live runtime gate are clean.
 - Immediately inspect open orders, cancel the canary, look up the terminal venue order status, replay compact canary evidence, replay source-of-truth state, run ledger health, and record recovery evidence.
+- Repeat the workflow against more than one low-notional, non-BTC CFM product before treating the Coinbase operator path as initially proven.
 - Keep the canary product scope small and Coinbase spot/CFM-focused until the venue contract has more live evidence.
 
 ### Strategy Helper Surface
@@ -62,11 +63,12 @@ Keep Coinbase as the reference live adapter until the venue contract is stable. 
 
 ### Order Management Policies
 
-Build order-management policies as reusable infrastructure rather than embedding them inside individual strategies:
+Order-management policies are reusable infrastructure rather than strategy-specific exchange code. The current surface includes:
 
 - Followup-on-fill management.
 - Same-side order movement through amend or cancel-replace.
-- Split and consolidation workflows.
+- Split workflows through explicit cancel-plus-child placement plans.
+- Consolidation workflows through explicit cancel-then-replacement plans.
 - Staged visible release for larger logical orders.
 - Future hidden, reserve, or iceberg-style execution policy when the operational contract is explicit.
 
@@ -76,6 +78,7 @@ Keep the project installable and testable as a normal Python package:
 
 - Preserve PEP 561 typing markers.
 - Keep console entry points stable.
+- Build and smoke-test the wheel in CI with public-compatible commands.
 - Keep public examples executable.
 - Run full regression before release.
 - Keep private operator state, credentials, local ledgers, and generated artifacts out of published source trees.

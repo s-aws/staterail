@@ -127,11 +127,23 @@ def test_venue_contract_report_checks_required_capabilities():
     assert spot.is_ok
     assert spot.missing_requirements == ()
     assert [check.requirement for check in spot.checks] == list(LIVE_ORDER_ROUTING_REQUIREMENTS)
+    assert VenueCapabilityRequirement.LIMIT_ORDERS in LIVE_ORDER_ROUTING_REQUIREMENTS
+    assert VenueCapabilityRequirement.POST_ONLY in LIVE_ORDER_ROUTING_REQUIREMENTS
+    assert (
+        VenueCapabilityRequirement.GOOD_UNTIL_CANCELLED_TIME_IN_FORCE
+        in LIVE_ORDER_ROUTING_REQUIREMENTS
+    )
     assert cfm.is_ok
     assert cfm.missing_requirements == ()
     assert intx.status == StrategyHelperStatus.MISSING
     assert VenueCapabilityRequirement.PRODUCT_METADATA_LOOKUP not in intx.missing_requirements
     assert VenueCapabilityRequirement.LIVE_EXECUTION in intx.missing_requirements
+    assert VenueCapabilityRequirement.LIMIT_ORDERS in intx.missing_requirements
+    assert VenueCapabilityRequirement.POST_ONLY in intx.missing_requirements
+    assert (
+        VenueCapabilityRequirement.GOOD_UNTIL_CANCELLED_TIME_IN_FORCE
+        in intx.missing_requirements
+    )
     assert metadata_only.is_ok
     assert metadata_only.missing_requirements == ()
     assert metadata_only.to_payload()["checks"] == [
@@ -188,6 +200,18 @@ def test_cli_venue_contract_report_prints_cfm_contract(capsys):
     assert payload["missing_requirements"] == []
     assert {
         "requirement": VenueCapabilityRequirement.POSITION_LOOKUP.value,
+        "supported": True,
+    } in payload["checks"]
+    assert {
+        "requirement": VenueCapabilityRequirement.LIMIT_ORDERS.value,
+        "supported": True,
+    } in payload["checks"]
+    assert {
+        "requirement": VenueCapabilityRequirement.POST_ONLY.value,
+        "supported": True,
+    } in payload["checks"]
+    assert {
+        "requirement": VenueCapabilityRequirement.GOOD_UNTIL_CANCELLED_TIME_IN_FORCE.value,
         "supported": True,
     } in payload["checks"]
 

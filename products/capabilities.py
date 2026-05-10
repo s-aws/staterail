@@ -236,6 +236,9 @@ LIVE_ORDER_ROUTING_REQUIREMENTS = (
     VenueCapabilityRequirement.MARKET_DATA_WEBSOCKET,
     VenueCapabilityRequirement.USER_ORDER_WEBSOCKET,
     VenueCapabilityRequirement.PLACE_ORDERS,
+    VenueCapabilityRequirement.LIMIT_ORDERS,
+    VenueCapabilityRequirement.POST_ONLY,
+    VenueCapabilityRequirement.GOOD_UNTIL_CANCELLED_TIME_IN_FORCE,
     VenueCapabilityRequirement.CANCEL_ORDERS,
     VenueCapabilityRequirement.ORDER_LOOKUP,
     VenueCapabilityRequirement.FILL_LOOKUP,
@@ -436,6 +439,10 @@ def _supports_requirement(
         return capabilities.supports_cancel_orders
     if requirement == VenueCapabilityRequirement.FILL_LOOKUP:
         return capabilities.supports_fill_lookup
+    if requirement == VenueCapabilityRequirement.GOOD_UNTIL_CANCELLED_TIME_IN_FORCE:
+        return TimeInForce.GOOD_UNTIL_CANCELLED in capabilities.supported_time_in_force
+    if requirement == VenueCapabilityRequirement.LIMIT_ORDERS:
+        return OrderType.LIMIT in capabilities.supported_order_types
     if requirement == VenueCapabilityRequirement.LIVE_EXECUTION:
         return capabilities.supports_live_execution
     if requirement == VenueCapabilityRequirement.MARKET_DATA_WEBSOCKET:
@@ -446,6 +453,8 @@ def _supports_requirement(
         return capabilities.supports_place_orders
     if requirement == VenueCapabilityRequirement.POSITION_LOOKUP:
         return capabilities.supports_position_lookup
+    if requirement == VenueCapabilityRequirement.POST_ONLY:
+        return capabilities.supports_post_only
     if requirement == VenueCapabilityRequirement.PRODUCT_METADATA_LOOKUP:
         return capabilities.supports_product_metadata_lookup
     if requirement == VenueCapabilityRequirement.USER_ORDER_WEBSOCKET:

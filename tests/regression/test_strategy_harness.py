@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 
 from actions.dry_run import DryRunExecutor
-from actions.gateway import ActionGateway, PlaceOrderIntent
+from actions.gateway import ActionGateway, CancelOrderIntent, PlaceOrderIntent
 from audit.ledger import AuditLedger
 from core.clock import FixedClock
 from core.engine import AuditCore
@@ -30,6 +30,7 @@ from core.enums import (
     OrderSizingDecisionStatus,
     OrderSide,
     OrderType,
+    OperatorPolicyPermission,
     ProductType,
     ProductVenue,
     ProductRuleCheckStatus,
@@ -66,6 +67,7 @@ from strategies import (
     strategy_decision_commands,
     strategy_followup_after_fill_intent,
     strategy_release_staged_placement_intent,
+    strategy_split_order_intents,
     strategy_staged_release_intents,
 )
 
@@ -1791,6 +1793,169 @@ def test_strategy_followup_after_fill_intent_rejects_small_or_incomplete_inputs(
             missing_catalog_snapshot,
             "fill-small",
         )
+
+
+def test_strategy_split_order_intents_cancel_source_then_create_children(workspace_tmp_path):
+    observed_at = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    ledger = AuditLedger(workspace_tmp_path / "audit.jsonl", clock=FixedClock(observed_at))
+    gateway = ActionGateway(AuditCore(ledger))
+    source_intent = PlaceOrderIntent(
+        action_id="source-action",
+        idempotency_key="source-client-order",
+        limit_price="100",
+        logical_order_id="source-logical",
+        order_type=OrderType.LIMIT,
+        post_only=True,
+        product_id="SHB-26JUN26-CDE",
+        side=OrderSide.BUY,
+        size="0.20",
+    )
+    source_receipt = gateway.submit_and_execute(source_intent.to_command(), DryRunExecutor())
+    projection = SourceOfTruthProjection.from_ledger(ledger)
+    policy = load_operator_policy_from_json_file(
+        Path("docs/examples/operator-policy.conservative-cfm-v0.json")
+    )
+    snapshot = StrategySnapshot(
+        as_of_sequence=projection.last_sequence,
+        evaluated_at=observed_at,
+        execution_mode=ExecutionMode.DRY_RUN,
+        ledger_path=ledger.path,
+        operator_policy=policy,
+        product_catalog=ProductCatalog((_strategy_product("SHB-26JUN26-CDE"),)),
+        projection=projection,
+    )
+
+    intents = strategy_split_order_intents(
+        "Example Strategy",
+        "split",
+        snapshot,
+        "source-logical",
+        2,
+        {"product_id": "SHB-26JUN26-CDE"},
+    )
+    repeated_intents = strategy_split_order_intents(
+        "Example Strategy",
+        "split",
+        snapshot,
+        "source-logical",
+        2,
+        {"product_id": "SHB-26JUN26-CDE"},
+    )
+    commands = strategy_decision_commands("Example Strategy", StrategyDecision(intents=intents))
+    receipts = tuple(gateway.submit_and_execute(command, DryRunExecutor()) for command in commands)
+    after_split = SourceOfTruthProjection.from_ledger(ledger)
+    cancel_intent = intents[0]
+    child_intents = intents[1:]
+
+    assert source_receipt.status == ActionStatus.EXECUTED
+    assert isinstance(cancel_intent, CancelOrderIntent)
+    assert all(isinstance(intent, PlaceOrderIntent) for intent in child_intents)
+    assert tuple(intent.action_id for intent in intents) == tuple(
+        intent.action_id for intent in repeated_intents
+    )
+    assert [receipt.status for receipt in receipts] == [
+        ActionStatus.EXECUTED,
+        ActionStatus.EXECUTED,
+        ActionStatus.EXECUTED,
+    ]
+    assert after_split.orders_by_action_id["source-action"].lifecycle_status == (
+        OrderLifecycleStatus.CANCELLED
+    )
+    assert after_split.orders_by_action_id["source-action"].cancel_action_ids == [
+        cancel_intent.action_id
+    ]
+    assert tuple(intent.size for intent in child_intents) == ("0.10", "0.10")
+    assert len({intent.action_id for intent in child_intents}) == 2
+    assert len({intent.idempotency_key for intent in child_intents}) == 2
+    assert all(intent.lineage_relation == OrderLineageRelation.SPLIT_CHILD for intent in child_intents)
+    assert all(intent.parent_order_id == "source-logical" for intent in child_intents)
+    assert all(intent.root_order_id == "source-logical" for intent in child_intents)
+    assert all(intent.source_order_ids == ("source-logical",) for intent in child_intents)
+    assert all(command.requested_by == "strategy:Example Strategy" for command in commands)
+
+    for index, intent in enumerate(child_intents, start=1):
+        logical_order = after_split.logical_orders_by_id[intent.logical_order_id]
+        placement = after_split.placements_by_id[intent.action_id]
+
+        assert logical_order.lineage_relation == OrderLineageRelation.SPLIT_CHILD
+        assert logical_order.parent_order_id == "source-logical"
+        assert logical_order.root_order_id == "source-logical"
+        assert logical_order.source_order_ids == ("source-logical",)
+        assert placement.logical_order_id == intent.logical_order_id
+        assert placement.placement_kind == OrderPlacementKind.INITIAL
+        assert placement.payload["metadata"]["split_child"]["child_index"] == index
+        assert placement.payload["metadata"]["split_child"]["source_action_id"] == "source-action"
+
+
+def test_strategy_split_order_intents_rejects_partial_fill_and_disabled_policy(
+    workspace_tmp_path,
+):
+    observed_at = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    ledger = AuditLedger(workspace_tmp_path / "audit.jsonl", clock=FixedClock(observed_at))
+    core = AuditCore(ledger)
+    gateway = ActionGateway(core)
+    gateway.submit_and_execute(
+        PlaceOrderIntent(
+            action_id="source-action",
+            idempotency_key="source-client-order",
+            limit_price="100",
+            logical_order_id="source-logical",
+            order_type=OrderType.LIMIT,
+            post_only=True,
+            product_id="SHB-26JUN26-CDE",
+            side=OrderSide.BUY,
+            size="0.20",
+        ).to_command(),
+        DryRunExecutor(),
+    )
+    placed_projection = SourceOfTruthProjection.from_ledger(ledger)
+    exchange_order_id = placed_projection.orders_by_action_id["source-action"].exchange_order_id
+    assert exchange_order_id is not None
+    policy = load_operator_policy_from_json_file(
+        Path("docs/examples/operator-policy.conservative-cfm-v0.json")
+    )
+    disabled_policy = replace(
+        policy,
+        lineage=replace(policy.lineage, split_orders=OperatorPolicyPermission.DISABLED),
+    )
+    base_snapshot = StrategySnapshot(
+        as_of_sequence=placed_projection.last_sequence,
+        evaluated_at=observed_at,
+        execution_mode=ExecutionMode.DRY_RUN,
+        ledger_path=ledger.path,
+        operator_policy=disabled_policy,
+        product_catalog=ProductCatalog((_strategy_product("SHB-26JUN26-CDE"),)),
+        projection=placed_projection,
+    )
+
+    with pytest.raises(StrategyContractError, match="does not allow split"):
+        strategy_split_order_intents("example", "split", base_snapshot, "source-logical", 2)
+
+    core.emit(
+        EventType.EXCHANGE_FILL,
+        {
+            "fill_id": "fill-1",
+            "order_id": exchange_order_id,
+            "price": "100",
+            "product_id": "SHB-26JUN26-CDE",
+            "side": "BUY",
+            "size": "0.01",
+            "trade_id": "trade-1",
+        },
+    )
+    filled_projection = SourceOfTruthProjection.from_ledger(ledger)
+    filled_snapshot = StrategySnapshot(
+        as_of_sequence=filled_projection.last_sequence,
+        evaluated_at=observed_at,
+        execution_mode=ExecutionMode.DRY_RUN,
+        ledger_path=ledger.path,
+        operator_policy=policy,
+        product_catalog=ProductCatalog((_strategy_product("SHB-26JUN26-CDE"),)),
+        projection=filled_projection,
+    )
+
+    with pytest.raises(StrategyContractError, match="partially filled"):
+        strategy_split_order_intents("example", "split", filled_snapshot, "source-logical", 2)
 
 
 def test_strategy_consolidation_intent_uses_source_orders_and_product_rules(

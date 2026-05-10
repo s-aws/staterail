@@ -115,6 +115,8 @@ The built-in `staged-release-manager` strategy only acts on already-staged place
 
 The built-in `followup-on-fill-manager` only acts on replayed fills that can be tied back to bot logical orders. It requires an operator policy with followups enabled plus product catalog metadata, emits at most one followup per evaluation, and still routes the followup through the normal gateway preview/submission path.
 
+Split workflows are exposed as a strategy helper, not a scheduled manager. A strategy can call `strategy_split_order_intents()` to turn one unfilled live logical order into an ordered cancel-plus-child-placement plan, but the operator should review ordered simulation previews before enabling any strategy that uses it.
+
 The built-in `consolidation-manager` only acts on unfilled replayed live orders that share product, side, and limit price. It requires merge lineage to be allowed, product catalog metadata, and fresh order-book data when the operator policy requires it. It emits explicit cancels before the replacement placement, so ordered simulation should be reviewed before enabling it on a live schedule.
 
 The built-in `anchor-repricing-manager` only acts on unfilled replayed live orders whose current limit price has drifted outside the configured anchor band. It requires anchor repricing and same-side moves to be allowed, product catalog metadata, fresh order-book midpoint input, and cancel-replace fallback because this project does not currently implement a venue amend executor. It emits an explicit cancel before the `cancel_replace` placement and preserves the logical order ID.

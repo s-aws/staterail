@@ -90,6 +90,8 @@ Followup-after-fill is available as a helper, not an autonomous strategy. `strat
 
 The built-in `followup-on-fill-manager` wraps that helper for conservative order-management automation. It emits at most one followup per evaluation, only for replayed fills that can be traced to a logical order, and only when an operator policy enables followups and product catalog metadata is present.
 
+Split order planning is available as a helper, not an autonomous strategy. `strategy_split_order_intents()` takes a replayed logical order ID, verifies that the source order is an unfilled cancelable live placement, applies product metadata and split-lineage policy, and returns an explicit cancel intent followed by deterministic same-side child `PlaceOrderIntent` values with `split_child` lineage. Strategy code still decides when a split is appropriate and must submit the returned intents in order.
+
 The built-in `consolidation-manager` wraps `strategy_consolidation_intent()` for conservative order tidying. It looks for two unfilled live orders with the same product, side, and limit price, emits explicit cancel intents for those source orders, then emits one consolidation placement. It requires merge lineage to be enabled in the operator policy, product catalog metadata, and fresh order-book input when the policy requires it.
 
 The built-in `anchor-repricing-manager` is conservative order-movement infrastructure. It looks for one unfilled same-side live order whose limit price is outside the configured anchor band, emits an explicit cancel intent, then emits a `cancel_replace` placement under the same logical order ID. It requires anchor repricing, same-side moves, product catalog metadata, fresh order-book midpoint input, cooldown compliance, and cancel-replace fallback.
@@ -390,13 +392,14 @@ Use the existing logical order and placement records:
 - `strategy_staged_release_intents()` to convert accepted staged-release sizing decisions into deterministic staged `PlaceOrderIntent` chunks.
 - `strategy_release_staged_placement_intent()` to convert a replayed staged placement into a deterministic live `release` intent through the normal gateway path.
 - `strategy_followup_after_fill_intent()` to convert a replayed fill into a deterministic opposite-side followup intent.
+- `strategy_split_order_intents()` to convert one unfilled live logical order into an explicit cancel intent plus deterministic same-side split-child placements.
 - `strategy_consolidation_intent()` to convert two or more same-product, same-side logical orders into one deterministic consolidation placement.
 - `ConsolidationManagerStrategy` for conservative same-price, same-side order tidying through explicit cancel-then-place intents.
 - `PassiveMarketMakingStrategy` for conservative midpoint-based staged bid/ask quote creation.
 - `PlaceOrderIntent.with_sizing_decision()` to carry accepted sizing into a gateway intent.
 - `PlaceOrderIntent.as_staged_release()` for not-yet-submitted placement records.
 
-Manual association requires explicit operator approval metadata. Consolidation helpers intentionally do not cancel source orders; managers that automate tidying must emit explicit ordered cancel and placement intents so simulation and runtime can evaluate the sequence through the gateway. Hidden, reserve, or iceberg-style execution policy should be added later as strategy/execution policy that consumes staged placements and release-size plans, then emits explicit release intents through the action gateway.
+Manual association requires explicit operator approval metadata. Consolidation helpers intentionally do not cancel source orders; managers that automate tidying must emit explicit ordered cancel and placement intents so simulation and runtime can evaluate the sequence through the gateway. Split helpers intentionally do return the cancel-plus-child placement sequence because splitting one active order without canceling the source would increase exposure. Hidden, reserve, or iceberg-style execution policy should be added later as strategy/execution policy that consumes staged placements and release-size plans, then emits explicit release intents through the action gateway.
 
 ## Adding A Venue Or Exchange
 
@@ -409,7 +412,7 @@ New venues should be added behind typed adapters:
 
 Current live routing is Coinbase spot and CFM futures. INTX should remain disabled for live routing until separate tests and eligibility assumptions are documented.
 
-Use `venue_contract_report()` before treating a venue as live-capable. The report derives from the existing `VenueCapabilities` source and checks explicit `VenueCapabilityRequirement` values, so future adapters have one capability contract instead of scattered boolean checks. The default live-routing requirements cover metadata lookup, market-data websocket, user-order websocket, place/cancel order support, order/fill/account lookup, and live execution. CFM-style futures can use `CFM_LIVE_ORDER_ROUTING_REQUIREMENTS` when position lookup is also required.
+Use `venue_contract_report()` before treating a venue as live-capable. The report derives from the existing `VenueCapabilities` source and checks explicit `VenueCapabilityRequirement` values, so future adapters have one capability contract instead of scattered boolean checks. The default live-routing requirements cover metadata lookup, market-data websocket, user-order websocket, live execution, limit order support, post-only support, good-til-cancelled time-in-force support, place/cancel order support, and order/fill/account lookup. CFM-style futures can use `CFM_LIVE_ORDER_ROUTING_REQUIREMENTS` when position lookup is also required.
 
 ### Venue Package Boundary
 

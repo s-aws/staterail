@@ -50,6 +50,7 @@ from strategies.harness import (
     strategy_decision_commands,
     strategy_followup_after_fill_intent,
     strategy_release_staged_placement_intent,
+    strategy_split_order_intents,
     strategy_staged_release_intents,
 )
 from strategies.market_data import (
@@ -300,6 +301,7 @@ __all__ = [
     "strategy_decision_commands",
     "strategy_followup_after_fill_intent",
     "strategy_release_staged_placement_intent",
+    "strategy_split_order_intents",
     "strategy_staged_release_intents",
     "tranche_release_sizes",
     "validate_limit_price",

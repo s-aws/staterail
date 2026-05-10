@@ -22,7 +22,7 @@ StateRail is not financial advice, not a trading strategy recommendation engine,
 - Coinbase user-channel reconciliation, order recovery, fill reconciliation, exchange-state snapshots, and reconciliation drift reporting.
 - Ledger health, readiness, live no-order preflight, live runtime admission gate, source-of-truth export, ledger export, checkpoint, anchor, archive, and operator place-order/cancel/open-order CLIs.
 - AWS S3 Object Lock support for immutable checkpoint anchors and ledger archives.
-- Quality tooling for release checks, package smoke, config wizard, and strategy wizard.
+- Public packaging checks for wheel builds, installed-package imports, console scripts, config wizard, and strategy wizard.
 
 ## Supported Venue Scope
 
@@ -140,6 +140,15 @@ pytest tests/regression/ -v
 ```
 
 Behavior-affecting changes should pass regression before they are considered ready.
+
+For release-bound changes, also smoke the installable package:
+
+```powershell
+python -m pip wheel . --no-deps --wheel-dir dist\wheelhouse
+python -m venv .package-smoke-venv
+.\.package-smoke-venv\Scripts\python -m pip install --no-index --find-links dist\wheelhouse staterail
+.\.package-smoke-venv\Scripts\staterail.exe --help
+```
 
 ## License
 
